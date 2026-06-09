@@ -184,9 +184,7 @@ export default function CarrinhoPage() {
         items,
         subtotal,
         deliveryType,
-        shippingOption: selectedShipping,
         deliveryPrice,
-        total,
         paymentUrl: payment.init_point || "",
         mercadoPagoPreferenceId: payment.id || "",
       });
