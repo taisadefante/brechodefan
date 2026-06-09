@@ -3,22 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogIn, MessageCircle, UserPlus } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 
 import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { createSale, getCustomerData } from "@/lib/firestore";
-import { CustomerData, DeliveryType } from "@/types";
+import { CustomerData, DeliveryType, ShippingOption } from "@/types";
 import { formatMoney } from "@/lib/utils";
 import { theme } from "@/lib/theme";
-
-type ShippingOption = {
-  id: string;
-  name: string;
-  company: string;
-  price: number;
-  deliveryTime: number | null;
-};
 
 const emptyCustomer: CustomerData = {
   name: "",
@@ -28,12 +20,17 @@ const emptyCustomer: CustomerData = {
   address: "",
   number: "",
   complement: "",
+  district: "",
   city: "",
   state: "",
 };
 
 const WHATSAPP_URL =
   "https://wa.me/5521988359825?text=Olá! Quero consultar entrega por Uber/99.";
+
+function onlyNumbers(value: string) {
+  return String(value || "").replace(/\D/g, "");
+}
 
 export default function CarrinhoPage() {
   const router = useRouter();
@@ -67,13 +64,14 @@ export default function CarrinhoPage() {
         const data = await getCustomerData(user.uid);
 
         if (data) {
-          setCustomer({
+          const mergedCustomer: CustomerData = {
             ...emptyCustomer,
             ...data,
             email: user.email || data.email || "",
-          });
+          };
 
-          setCepDestino(data.cep || "");
+          setCustomer(mergedCustomer);
+          setCepDestino(mergedCustomer.cep || "");
         } else {
           setCustomer({
             ...emptyCustomer,
@@ -94,7 +92,14 @@ export default function CarrinhoPage() {
   }, [cepDestino, deliveryType]);
 
   async function calcularFrete() {
-    if (!cepDestino || !items.length) return;
+    const cleanCep = onlyNumbers(cepDestino);
+
+    if (!cleanCep || !items.length) return;
+
+    if (cleanCep.length !== 8) {
+      alert("Digite um CEP válido com 8 números.");
+      return;
+    }
 
     setCalculandoFrete(true);
     setSelectedShipping(null);
@@ -107,7 +112,7 @@ export default function CarrinhoPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          cepDestino,
+          cepDestino: cleanCep,
           items,
         }),
       });
@@ -115,11 +120,22 @@ export default function CarrinhoPage() {
       const data = await response.json();
 
       if (!response.ok) {
+        console.error("Erro ao calcular frete:", data);
         alert(data.error || "Erro ao calcular frete.");
         return;
       }
 
-      setShippingOptions(data.options || []);
+      const options = Array.isArray(data.options) ? data.options : [];
+
+      if (!options.length) {
+        alert("Nenhuma opção de frete encontrada para este CEP.");
+        return;
+      }
+
+      setShippingOptions(options);
+    } catch (error) {
+      console.error("Erro ao calcular frete:", error);
+      alert("Erro ao calcular frete.");
     } finally {
       setCalculandoFrete(false);
     }
@@ -141,7 +157,8 @@ export default function CarrinhoPage() {
     setLoading(true);
 
     try {
-      const finalCustomer = {
+      const finalCustomer: CustomerData = {
+        ...emptyCustomer,
         ...customer,
         cep: cepDestino || customer.cep,
         email: user.email || customer.email,
@@ -155,13 +172,21 @@ export default function CarrinhoPage() {
 
       const payment = await response.json();
 
+      if (!response.ok) {
+        console.error("Erro Mercado Pago:", payment);
+        alert(payment.error || "Erro ao gerar pagamento.");
+        return;
+      }
+
       const saleId = await createSale({
         userId: user.uid,
         customer: finalCustomer,
         items,
         subtotal,
         deliveryType,
+        shippingOption: selectedShipping,
         deliveryPrice,
+        total,
         paymentUrl: payment.init_point || "",
         mercadoPagoPreferenceId: payment.id || "",
       });
@@ -199,7 +224,7 @@ export default function CarrinhoPage() {
               }}
             >
               <img
-                src={item.images?.[0] || item.imageUrl || ""}
+                src={item.images?.[0] || ""}
                 alt={item.name}
                 style={{
                   width: 100,
@@ -257,7 +282,7 @@ export default function CarrinhoPage() {
                 Envio pelos Correios/transportadora - calcular frete
               </option>
               <option value="retirada">Retirada em Realengo/RJ - grátis</option>
-              <option value="uber_99">
+              <option value="combinar_whatsapp">
                 Uber / 99 Entrega - consultar WhatsApp
               </option>
             </select>
@@ -336,7 +361,7 @@ export default function CarrinhoPage() {
               </div>
             )}
 
-            {deliveryType === "uber_99" && (
+            {deliveryType === "combinar_whatsapp" && (
               <div
                 className="p-3 mb-3"
                 style={{
@@ -440,6 +465,7 @@ export default function CarrinhoPage() {
                           customer.address,
                           customer.number,
                           customer.complement,
+                          customer.district,
                           customer.city,
                           customer.state,
                         ]
