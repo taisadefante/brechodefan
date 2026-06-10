@@ -1,5 +1,6 @@
 import "bootstrap/dist/css/bootstrap.min.css";
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import { AuthProvider } from "@/contexts/AuthContext";
 import { CartProvider } from "@/contexts/CartContext";
@@ -33,7 +34,9 @@ export default function RootLayout({
       >
         <AuthProvider>
           <CartProvider>
-            <Navbar />
+            <Suspense fallback={null}>
+              <Navbar />
+            </Suspense>
 
             <main style={{ flex: 1 }}>{children}</main>
 

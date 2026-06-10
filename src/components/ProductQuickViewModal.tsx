@@ -25,9 +25,11 @@ export default function ProductQuickViewModal({
   onClose: () => void;
 }) {
   const { addToCart } = useCart();
-  const images = product.images?.length
-    ? product.images
-    : [product.imageUrl || ""];
+
+  const images = Array.isArray(product.images)
+    ? product.images.filter(Boolean)
+    : [];
+
   const [index, setIndex] = useState(0);
   const currentImage = images[index];
 
@@ -83,7 +85,7 @@ export default function ProductQuickViewModal({
               {currentImage ? (
                 <img
                   src={currentImage}
-                  alt={product.name}
+                  alt={product.name || "Produto"}
                   style={{
                     width: "100%",
                     height: "100%",

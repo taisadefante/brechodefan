@@ -11,7 +11,7 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db } from "./lib/firebase";
 import {
   CartItem,
   CustomerData,
@@ -29,39 +29,49 @@ export async function getProducts(includeSold = false): Promise<Product[]> {
 
   const now = Date.now();
 
-  const products = snap.docs.map(
-    (item) =>
-      ({
-        id: item.id,
-        ...item.data(),
-      }) as Product,
-  );
+  const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Product);
 
-  const expired = products.filter(
+  const expiredReserved = products.filter(
     (product) =>
       product.status === "reservado" &&
-      product.reservedUntil &&
+      product.reservedUntil !== undefined &&
+      product.reservedUntil !== null &&
       product.reservedUntil < now,
   );
 
   await Promise.all(
-    expired.map((product) =>
+    expiredReserved.map((product) =>
       updateDoc(doc(db, "products", product.id), {
         status: "disponivel",
         reservedUntil: null,
+        updatedAt: now,
       }),
     ),
   );
 
-  return products
-    .map((product) =>
+  const normalizedProducts: Product[] = products.map((product) => {
+    if (
       product.status === "reservado" &&
-      product.reservedUntil &&
+      product.reservedUntil !== undefined &&
+      product.reservedUntil !== null &&
       product.reservedUntil < now
-        ? { ...product, status: "disponivel", reservedUntil: null }
-        : product,
-    )
-    .filter((product) => includeSold || product.status !== "vendido");
+    ) {
+      const normalizedProduct: Product = {
+        ...product,
+        status: "disponivel",
+        reservedUntil: null,
+        updatedAt: now,
+      };
+
+      return normalizedProduct;
+    }
+
+    return product;
+  });
+
+  return normalizedProducts.filter(
+    (product) => includeSold || product.status !== "vendido",
+  );
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
@@ -69,69 +79,61 @@ export async function getProduct(id: string): Promise<Product | null> {
 
   if (!snap.exists()) return null;
 
-  return {
-    id: snap.id,
-    ...snap.data(),
-  } as Product;
+  return { id: snap.id, ...snap.data() } as Product;
 }
 
-export async function saveProduct(product: Omit<Product, "id">, id?: string) {
-  const cleanProduct: Omit<Product, "id"> = {
-    name: product.name || "",
-    description: product.description || "",
-    price: Number(product.price || 0),
-    category: product.category || "",
-    size: product.size || "",
-    age: product.age || "",
-    color: product.color || "",
-    gender: product.gender || "",
-    brand: product.brand || "",
-    condition: product.condition || "",
-    measurements: product.measurements || "",
-    stock: Number(product.stock || 1),
-    weight: Number(product.weight || 0),
-    height: Number(product.height || 0),
-    width: Number(product.width || 0),
-    length: Number(product.length || 0),
-    images: product.images || [],
-    status: product.status || "disponivel",
-    reservedUntil: product.reservedUntil || null,
-    createdAt: product.createdAt || Date.now(),
-    soldAt: product.soldAt || null,
+export async function saveProduct(
+  product: Product | Omit<Product, "id">,
+  id?: string,
+): Promise<string> {
+  const productId = id || ("id" in product ? product.id : undefined);
+
+  const payload = {
+    ...product,
+    updatedAt: Date.now(),
   };
 
-  if (id) {
-    await updateDoc(doc(db, "products", id), cleanProduct);
-    return id;
+  delete (payload as Partial<Product>).id;
+
+  if (productId) {
+    await updateDoc(doc(db, "products", productId), payload);
+    return productId;
   }
 
-  const created = await addDoc(collection(db, "products"), cleanProduct);
+  const created = await addDoc(collection(db, "products"), {
+    ...payload,
+    createdAt: Date.now(),
+  });
+
   return created.id;
 }
 
-export async function deleteProduct(productId: string) {
-  await deleteDoc(doc(db, "products", productId));
+export async function deleteProduct(id: string): Promise<void> {
+  await deleteDoc(doc(db, "products", id));
 }
 
-export async function reserveProduct(productId: string) {
+export async function reserveProduct(productId: string): Promise<void> {
   await updateDoc(doc(db, "products", productId), {
     status: "reservado",
     reservedUntil: Date.now() + 2 * 60 * 60 * 1000,
+    updatedAt: Date.now(),
   });
 }
 
-export async function releaseProduct(productId: string) {
+export async function releaseProduct(productId: string): Promise<void> {
   await updateDoc(doc(db, "products", productId), {
     status: "disponivel",
     reservedUntil: null,
+    updatedAt: Date.now(),
   });
 }
 
-export async function markProductSold(productId: string) {
+export async function markProductSold(productId: string): Promise<void> {
   await updateDoc(doc(db, "products", productId), {
     status: "vendido",
     soldAt: Date.now(),
     reservedUntil: null,
+    updatedAt: Date.now(),
   });
 }
 
@@ -140,77 +142,57 @@ export async function getOptions(type: OptionType): Promise<string[]> {
     query(collection(db, "options", type, "items"), orderBy("name", "asc")),
   );
 
-  return snap.docs.map((item) => String(item.data().name || ""));
+  return snap.docs.map((d) => String(d.data().name || ""));
 }
 
-export async function getOptionDocs(type: OptionType) {
+export async function getOptionDocs(
+  type: OptionType,
+): Promise<Array<{ id: string; name: string }>> {
   const snap = await getDocs(
     query(collection(db, "options", type, "items"), orderBy("name", "asc")),
   );
 
-  return snap.docs.map((item) => ({
-    id: item.id,
-    name: String(item.data().name || ""),
+  return snap.docs.map((d) => ({
+    id: d.id,
+    name: String(d.data().name || ""),
   }));
 }
 
-export async function addOption(type: OptionType, name: string) {
+export async function addOption(type: OptionType, name: string): Promise<void> {
+  const cleanName = name.trim();
+
+  if (!cleanName) {
+    throw new Error("Informe um nome válido.");
+  }
+
   await addDoc(collection(db, "options", type, "items"), {
-    name: name || "",
+    name: cleanName,
     createdAt: Date.now(),
   });
 }
 
-export async function editOption(type: OptionType, id: string, name: string) {
+export async function editOption(
+  type: OptionType,
+  id: string,
+  name: string,
+): Promise<void> {
+  const cleanName = name.trim();
+
+  if (!cleanName) {
+    throw new Error("Informe um nome válido.");
+  }
+
   await updateDoc(doc(db, "options", type, "items", id), {
-    name: name || "",
+    name: cleanName,
+    updatedAt: Date.now(),
   });
 }
 
-export async function deleteOption(type: OptionType, id: string) {
+export async function deleteOption(
+  type: OptionType,
+  id: string,
+): Promise<void> {
   await deleteDoc(doc(db, "options", type, "items", id));
-}
-
-export async function saveCustomerData(userId: string, data: CustomerData) {
-  const cleanData: CustomerData = {
-    name: data.name || "",
-    email: data.email || "",
-    phone: data.phone || "",
-    cep: data.cep || "",
-    address: data.address || "",
-    number: data.number || "",
-    complement: data.complement || "",
-    district: data.district || "",
-    city: data.city || "",
-    state: data.state || "",
-  };
-
-  await setDoc(doc(db, "customers", userId), cleanData, {
-    merge: true,
-  });
-}
-
-export async function getCustomerData(
-  userId: string,
-): Promise<CustomerData | null> {
-  const snap = await getDoc(doc(db, "customers", userId));
-
-  if (!snap.exists()) return null;
-
-  const data = snap.data();
-
-  return {
-    name: String(data.name || ""),
-    email: String(data.email || ""),
-    phone: String(data.phone || ""),
-    cep: String(data.cep || ""),
-    address: String(data.address || ""),
-    number: String(data.number || ""),
-    complement: String(data.complement || ""),
-    district: String(data.district || ""),
-    city: String(data.city || ""),
-    state: String(data.state || ""),
-  };
 }
 
 export async function createSale(params: {
@@ -222,33 +204,18 @@ export async function createSale(params: {
   deliveryPrice: number;
   paymentUrl?: string;
   mercadoPagoPreferenceId?: string;
-}) {
-  const total =
-    Number(params.subtotal || 0) + Number(params.deliveryPrice || 0);
+}): Promise<string> {
+  const total = params.subtotal + params.deliveryPrice;
 
-  const sale = {
+  const sale: Omit<Sale, "id"> = {
     userId: params.userId,
-    customer: {
-      name: params.customer.name || "",
-      email: params.customer.email || "",
-      phone: params.customer.phone || "",
-      cep: params.customer.cep || "",
-      address: params.customer.address || "",
-      number: params.customer.number || "",
-      complement: params.customer.complement || "",
-      district: params.customer.district || "",
-      city: params.customer.city || "",
-      state: params.customer.state || "",
-    },
-    items: params.items || [],
-    subtotal: Number(params.subtotal || 0),
+    customer: params.customer,
+    items: params.items,
+    subtotal: params.subtotal,
     deliveryType: params.deliveryType,
-    deliveryPrice: Number(params.deliveryPrice || 0),
+    deliveryPrice: params.deliveryPrice,
     total,
-    status: "aguardando_pagamento" as SaleStatus,
-    trackingCode: "",
-    cancelRequested: false,
-    cancelReason: "",
+    status: "aguardando_pagamento",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     paymentUrl: params.paymentUrl || "",
@@ -256,6 +223,7 @@ export async function createSale(params: {
   };
 
   const ref = await addDoc(collection(db, "sales"), sale);
+
   return ref.id;
 }
 
@@ -268,13 +236,7 @@ export async function getUserSales(userId: string): Promise<Sale[]> {
     ),
   );
 
-  return snap.docs.map(
-    (item) =>
-      ({
-        id: item.id,
-        ...item.data(),
-      }) as Sale,
-  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Sale);
 }
 
 export async function getAllSales(): Promise<Sale[]> {
@@ -282,20 +244,14 @@ export async function getAllSales(): Promise<Sale[]> {
     query(collection(db, "sales"), orderBy("createdAt", "desc")),
   );
 
-  return snap.docs.map(
-    (item) =>
-      ({
-        id: item.id,
-        ...item.data(),
-      }) as Sale,
-  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Sale);
 }
 
 export async function updateSaleStatus(
   id: string,
   status: SaleStatus,
   trackingCode?: string,
-) {
+): Promise<void> {
   await updateDoc(doc(db, "sales", id), {
     status,
     trackingCode: trackingCode || "",
@@ -309,10 +265,7 @@ export async function updateSaleStatus(
     status === "enviado"
   ) {
     const saleSnap = await getDoc(doc(db, "sales", id));
-
-    if (!saleSnap.exists()) return;
-
-    const sale = saleSnap.data() as Sale;
+    const sale = saleSnap.data() as Sale | undefined;
 
     if (sale?.items?.length) {
       await Promise.all(sale.items.map((item) => markProductSold(item.id)));
@@ -320,21 +273,21 @@ export async function updateSaleStatus(
   }
 }
 
-export async function requestCancelSale(id: string, reason: string) {
+export async function requestCancelSale(
+  id: string,
+  reason: string,
+): Promise<void> {
   await updateDoc(doc(db, "sales", id), {
     status: "cancelamento_solicitado",
     cancelRequested: true,
-    cancelReason: reason || "",
+    cancelReason: reason,
     updatedAt: Date.now(),
   });
 }
 
-export async function approveCancelSale(id: string) {
+export async function approveCancelSale(id: string): Promise<void> {
   const saleSnap = await getDoc(doc(db, "sales", id));
-
-  if (!saleSnap.exists()) return;
-
-  const sale = saleSnap.data() as Sale;
+  const sale = saleSnap.data() as Sale | undefined;
 
   await updateDoc(doc(db, "sales", id), {
     status: "cancelado",
@@ -344,4 +297,21 @@ export async function approveCancelSale(id: string) {
   if (sale?.items?.length) {
     await Promise.all(sale.items.map((item) => releaseProduct(item.id)));
   }
+}
+
+export async function saveCustomerData(
+  userId: string,
+  data: CustomerData,
+): Promise<void> {
+  await setDoc(doc(db, "customers", userId), data, { merge: true });
+}
+
+export async function getCustomerData(
+  userId: string,
+): Promise<CustomerData | null> {
+  const snap = await getDoc(doc(db, "customers", userId));
+
+  if (!snap.exists()) return null;
+
+  return snap.data() as CustomerData;
 }

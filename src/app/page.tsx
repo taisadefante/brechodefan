@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { MapPin, ShoppingBag, Sparkles } from "lucide-react";
 
 import { getProducts } from "@/lib/firestore";
@@ -12,12 +12,9 @@ import FilterBar from "@/components/FilterBar";
 import { normalizeText } from "@/lib/utils";
 import { theme } from "@/lib/theme";
 
-const WHATSAPP_URL =
-  "https://wa.me/5521988359825?text=Olá! Vim pelo site Defan Brechó.";
-
 const ITEMS_PER_PAGE = 20;
 
-export default function Home() {
+function HomeContent() {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [search, setSearch] = useState("");
@@ -253,5 +250,13 @@ export default function Home() {
         />
       )}
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<main className="container py-5">Carregando...</main>}>
+      <HomeContent />
+    </Suspense>
   );
 }

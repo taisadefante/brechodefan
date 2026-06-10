@@ -13,6 +13,11 @@ import { formatMoney } from "@/lib/utils";
 import { theme } from "@/lib/theme";
 import { useCart } from "@/contexts/CartContext";
 
+type ProductCardProps = {
+  product: Product;
+  onView?: () => void;
+};
+
 function hasValue(value?: string | number | null) {
   if (value === undefined || value === null) return false;
   const text = String(value).trim();
@@ -36,19 +41,13 @@ function productIsInCart(cartData: unknown, productId: string) {
   );
 }
 
-export default function ProductCard({
-  product,
-  onView,
-}: {
-  product: Product;
-  onView: () => void;
-}) {
+export default function ProductCard({ product, onView }: ProductCardProps) {
   const cart = useCart();
   const { addToCart } = cart;
 
-  const images = product.images?.length
-    ? product.images
-    : [product.imageUrl || ""];
+  const images = Array.isArray(product.images)
+    ? product.images.filter((image) => Boolean(image))
+    : [];
 
   const [index, setIndex] = useState(0);
   const currentImage = images[index];
@@ -63,16 +62,22 @@ export default function ProductCard({
     hasValue(product.brand) && ["Marca", product.brand],
   ].filter(Boolean) as [string, string][];
 
+  function handleView() {
+    if (onView) {
+      onView();
+    }
+  }
+
   return (
     <div
-      onClick={onView}
+      onClick={handleView}
       style={{
         background: "#fffaf3",
         borderRadius: 24,
         overflow: "hidden",
         border: `1px solid ${theme.border}`,
         boxShadow: "0 14px 32px rgba(54,35,24,.10)",
-        cursor: "pointer",
+        cursor: onView ? "pointer" : "default",
         height: "100%",
         display: "flex",
         flexDirection: "column",
@@ -114,7 +119,7 @@ export default function ProductCard({
         {currentImage ? (
           <img
             src={currentImage}
-            alt={product.name}
+            alt={product.name || "Produto"}
             style={{
               width: "100%",
               height: "100%",
@@ -185,18 +190,20 @@ export default function ProductCard({
         )}
 
         <div className="d-flex gap-2 mt-auto">
-          <button
-            type="button"
-            className="btn btn-outline-secondary flex-fill"
-            onClick={(e) => {
-              e.stopPropagation();
-              onView();
-            }}
-            style={{ borderRadius: 999 }}
-          >
-            <Eye size={16} className="me-1" />
-            Ver
-          </button>
+          {onView && (
+            <button
+              type="button"
+              className="btn btn-outline-secondary flex-fill"
+              onClick={(e) => {
+                e.stopPropagation();
+                onView();
+              }}
+              style={{ borderRadius: 999 }}
+            >
+              <Eye size={16} className="me-1" />
+              Ver
+            </button>
+          )}
 
           <button
             type="button"

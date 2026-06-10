@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   approveCancelSale,
@@ -24,13 +24,15 @@ const statuses: SaleStatus[] = [
   "cancelado",
 ];
 
-export default function AdminVendasPage() {
+const ADMIN_EMAIL = "taisadefante@hotmail.com";
+
+function AdminVendasContent() {
   const { user, loading, isAdmin, login, logout } = useAuth();
 
   const [sales, setSales] = useState<Sale[]>([]);
   const [tracking, setTracking] = useState<Record<string, string>>({});
 
-  const [email, setEmail] = useState("taisadefante@hotmail.com");
+  const [email, setEmail] = useState(ADMIN_EMAIL);
   const [password, setPassword] = useState("");
   const [erro, setErro] = useState("");
   const [logging, setLogging] = useState(false);
@@ -45,14 +47,13 @@ export default function AdminVendasPage() {
     }
   }, [user, isAdmin]);
 
-  async function handleAdminLogin(e: React.FormEvent) {
+  async function handleAdminLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-
     setErro("");
     setLogging(true);
 
     try {
-      if (email.trim().toLowerCase() !== "taisadefante@hotmail.com") {
+      if (email.trim().toLowerCase() !== ADMIN_EMAIL) {
         setErro("Este e-mail não tem acesso ao painel administrativo.");
         return;
       }
@@ -120,6 +121,7 @@ export default function AdminVendasPage() {
             />
 
             <button
+              type="submit"
               disabled={logging}
               className="btn w-100"
               style={{
@@ -186,6 +188,7 @@ export default function AdminVendasPage() {
           </Link>
 
           <button
+            type="button"
             onClick={logout}
             className="btn btn-outline-danger"
             style={{ borderRadius: 999 }}
@@ -207,6 +210,7 @@ export default function AdminVendasPage() {
           </div>
 
           <button
+            type="button"
             onClick={load}
             className="btn btn-sm"
             style={{
@@ -282,15 +286,16 @@ export default function AdminVendasPage() {
                   className="form-control mb-2"
                   value={tracking[sale.id] ?? sale.trackingCode ?? ""}
                   onChange={(e) =>
-                    setTracking({
-                      ...tracking,
+                    setTracking((prev) => ({
+                      ...prev,
                       [sale.id]: e.target.value,
-                    })
+                    }))
                   }
                   placeholder="Ex: BR123456789BR"
                 />
 
                 <button
+                  type="button"
                   className="btn btn-sm me-2"
                   style={{
                     background: theme.brown,
@@ -304,6 +309,7 @@ export default function AdminVendasPage() {
 
                 {sale.status === "cancelamento_solicitado" && (
                   <button
+                    type="button"
                     className="btn btn-sm btn-outline-danger"
                     style={{ borderRadius: 999 }}
                     onClick={() => approveCancel(sale.id)}
@@ -337,5 +343,13 @@ export default function AdminVendasPage() {
         )}
       </section>
     </main>
+  );
+}
+
+export default function AdminVendasPage() {
+  return (
+    <Suspense fallback={<main className="container py-5">Carregando...</main>}>
+      <AdminVendasContent />
+    </Suspense>
   );
 }

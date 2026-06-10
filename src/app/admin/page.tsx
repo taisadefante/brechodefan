@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Eye,
@@ -20,7 +20,7 @@ import ProductModal from "@/components/admin/ProductModal";
 
 const ADMIN_EMAIL = "taisadefante@hotmail.com";
 
-export default function AdminPage() {
+function AdminContent() {
   const { user, loading, isAdmin, login, logout } = useAuth();
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -40,10 +40,12 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
-    if (user && isAdmin) load();
+    if (user && isAdmin) {
+      load();
+    }
   }, [user, isAdmin]);
 
-  async function handleAdminLogin(e: React.FormEvent) {
+  async function handleAdminLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErro("");
     setLogging(true);
@@ -83,7 +85,7 @@ export default function AdminPage() {
     const month = new Date().getMonth();
     const year = new Date().getFullYear();
 
-    const validSales = sales.filter((s) => !["cancelado"].includes(s.status));
+    const validSales = sales.filter((s) => s.status !== "cancelado");
 
     const monthSales = validSales.filter((s) => {
       const d = new Date(s.createdAt);
@@ -98,7 +100,9 @@ export default function AdminPage() {
     };
   }, [products, sales]);
 
-  if (loading) return <main className="container py-5">Carregando...</main>;
+  if (loading) {
+    return <main className="container py-5">Carregando...</main>;
+  }
 
   if (!user || !isAdmin) {
     return (
@@ -158,13 +162,14 @@ export default function AdminPage() {
               <button
                 type="button"
                 className="btn btn-outline-secondary"
-                onClick={() => setShowPassword(!showPassword)}
+                onClick={() => setShowPassword((prev) => !prev)}
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
 
             <button
+              type="submit"
               disabled={logging}
               className="btn w-100"
               style={{
@@ -231,6 +236,7 @@ export default function AdminPage() {
           </Link>
 
           <button
+            type="button"
             className="btn"
             onClick={openNewProduct}
             style={{
@@ -243,6 +249,7 @@ export default function AdminPage() {
           </button>
 
           <button
+            type="button"
             onClick={logout}
             className="btn btn-outline-danger"
             style={{ borderRadius: 999 }}
@@ -259,7 +266,7 @@ export default function AdminPage() {
           ["Vendidos", stats.sold],
           ["Faturamento mensal", formatMoney(stats.revenue)],
         ].map(([label, value]) => (
-          <div className="col-md-3" key={label}>
+          <div className="col-md-3" key={String(label)}>
             <div
               className="p-4"
               style={{
@@ -289,6 +296,7 @@ export default function AdminPage() {
           <h4 className="fw-bold mb-0">Produtos</h4>
 
           <button
+            type="button"
             className="btn btn-sm"
             onClick={load}
             style={{
@@ -353,6 +361,7 @@ export default function AdminPage() {
                   <td>
                     <div className="d-flex gap-2">
                       <button
+                        type="button"
                         className="btn btn-sm btn-outline-secondary"
                         onClick={() => openEditProduct(p)}
                       >
@@ -360,6 +369,7 @@ export default function AdminPage() {
                       </button>
 
                       <button
+                        type="button"
                         className="btn btn-sm btn-outline-danger"
                         onClick={() => handleDeleteProduct(p)}
                       >
@@ -393,5 +403,13 @@ export default function AdminPage() {
         />
       )}
     </main>
+  );
+}
+
+export default function AdminPage() {
+  return (
+    <Suspense fallback={<main className="container py-5">Carregando...</main>}>
+      <AdminContent />
+    </Suspense>
   );
 }

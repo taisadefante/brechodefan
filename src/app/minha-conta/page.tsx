@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Eye, EyeOff, ShoppingBag, User } from "lucide-react";
 import {
   getCustomerData,
@@ -21,11 +21,12 @@ const emptyCustomer: CustomerData = {
   address: "",
   number: "",
   complement: "",
+  district: "",
   city: "",
   state: "",
 };
 
-export default function MinhaContaPage() {
+function MinhaContaContent() {
   const { user, loading, login, register, resetPassword, logout } = useAuth();
 
   const [mode, setMode] = useState<"login" | "cadastro">("login");
@@ -54,7 +55,7 @@ export default function MinhaContaPage() {
     }
   }, [user]);
 
-  async function submitAuth(e: React.FormEvent) {
+  async function submitAuth(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     setErro("");
@@ -68,6 +69,7 @@ export default function MinhaContaPage() {
         const credential = await register(customer.email, password);
 
         await saveCustomerData(credential.user.uid, {
+          ...emptyCustomer,
           ...customer,
           email: customer.email,
         });
@@ -105,6 +107,7 @@ export default function MinhaContaPage() {
 
     try {
       await saveCustomerData(user.uid, {
+        ...emptyCustomer,
         ...customer,
         email: user.email || customer.email,
       });
@@ -206,7 +209,7 @@ export default function MinhaContaPage() {
               <button
                 type="button"
                 className="btn btn-outline-secondary"
-                onClick={() => setShowPassword(!showPassword)}
+                onClick={() => setShowPassword((prev) => !prev)}
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
@@ -270,6 +273,15 @@ export default function MinhaContaPage() {
                   </div>
                 </div>
 
+                <label className="form-label">Bairro</label>
+                <input
+                  className="form-control mb-3"
+                  value={customer.district}
+                  onChange={(e) =>
+                    setCustomer({ ...customer, district: e.target.value })
+                  }
+                />
+
                 <label className="form-label">Cidade</label>
                 <input
                   className="form-control mb-3"
@@ -291,6 +303,7 @@ export default function MinhaContaPage() {
             )}
 
             <button
+              type="submit"
               className="btn w-100 mt-2"
               disabled={saving}
               style={{
@@ -308,6 +321,7 @@ export default function MinhaContaPage() {
           </form>
 
           <button
+            type="button"
             className="btn btn-link w-100 mt-3"
             onClick={() => {
               setErro("");
@@ -344,6 +358,7 @@ export default function MinhaContaPage() {
           }}
         >
           <button
+            type="button"
             onClick={() => setActiveTab("dados")}
             className="btn"
             style={{
@@ -359,6 +374,7 @@ export default function MinhaContaPage() {
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab("compras")}
             className="btn"
             style={{
@@ -393,6 +409,7 @@ export default function MinhaContaPage() {
             <h4 className="fw-bold mb-0">Meus dados</h4>
 
             <button
+              type="button"
               onClick={logout}
               className="btn btn-outline-secondary btn-sm"
               style={{ borderRadius: 999 }}
@@ -410,6 +427,7 @@ export default function MinhaContaPage() {
               ["address", "Endereço"],
               ["number", "Número"],
               ["complement", "Complemento"],
+              ["district", "Bairro"],
               ["city", "Cidade"],
               ["state", "Estado"],
             ].map(([key, label]) => (
@@ -424,10 +442,13 @@ export default function MinhaContaPage() {
                 <label className="form-label">{label}</label>
                 <input
                   className="form-control mb-2"
-                  value={customer[key as keyof CustomerData]}
+                  value={String(customer[key as keyof CustomerData] || "")}
                   disabled={key === "email"}
                   onChange={(e) =>
-                    setCustomer({ ...customer, [key]: e.target.value })
+                    setCustomer({
+                      ...customer,
+                      [key]: e.target.value,
+                    })
                   }
                 />
               </div>
@@ -435,6 +456,7 @@ export default function MinhaContaPage() {
           </div>
 
           <button
+            type="button"
             onClick={saveData}
             disabled={saving}
             className="btn w-100 mt-3"
@@ -518,6 +540,7 @@ export default function MinhaContaPage() {
                 sale.status,
               ) && (
                 <button
+                  type="button"
                   className="btn btn-sm btn-outline-danger mt-2"
                   onClick={() => cancelSale(sale.id)}
                   style={{ borderRadius: 999 }}
@@ -536,5 +559,13 @@ export default function MinhaContaPage() {
         </section>
       )}
     </main>
+  );
+}
+
+export default function MinhaContaPage() {
+  return (
+    <Suspense fallback={<main className="container py-5">Carregando...</main>}>
+      <MinhaContaContent />
+    </Suspense>
   );
 }
