@@ -1,30 +1,68 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
+import {
+  AlertTriangle,
+  Eye,
+  EyeOff,
+  Lock,
+  Package,
+  RefreshCw,
+  ShoppingBag,
+  TrendingUp,
+} from "lucide-react";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signOut,
   User,
 } from "firebase/auth";
 
 import { adminAuth } from "@/lib/firebase-admin-auth";
-import { getAllSales, getProducts } from "@/lib/firestore";
-import { Product, Sale } from "@/types";
-import { formatMoney } from "@/lib/utils";
+import { getAllSales, getProducts, updateSaleStatus } from "@/lib/firestore";
+import { Product, Sale, SaleStatus } from "@/types";
+import { formatMoney, statusLabel } from "@/lib/utils";
 import { theme } from "@/lib/theme";
 
 const ADMIN_EMAIL =
   process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() ||
   "taisadefante@hotmail.com";
 
+const statuses: SaleStatus[] = [
+  "aguardando_pagamento",
+  "pago",
+  "separando",
+  "pronto_envio",
+  "pronto_retirada",
+  "enviado",
+  "entregue",
+  "cancelamento_solicitado",
+  "cancelado",
+];
+
+function formatDate(value?: number | string | null) {
+  if (!value) return "Não informado";
+
+  const date =
+    typeof value === "number" ? new Date(value) : new Date(String(value));
+
+  if (Number.isNaN(date.getTime())) return "Não informado";
+
+  return date.toLocaleString("pt-BR");
+}
+
 function AdminContent() {
+  const today = new Date();
+
   const [adminUser, setAdminUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [updatingSaleId, setUpdatingSaleId] = useState<string | null>(null);
+
+  const [filterDay, setFilterDay] = useState("");
+  const [filterMonth, setFilterMonth] = useState(String(today.getMonth() + 1));
+  const [filterYear, setFilterYear] = useState(String(today.getFullYear()));
 
   const [email, setEmail] = useState(ADMIN_EMAIL);
   const [password, setPassword] = useState("");
@@ -52,9 +90,15 @@ function AdminContent() {
       ]);
 
       setProducts(productsList);
-      setSales(salesList);
+
+      setSales(
+        [...salesList].sort(
+          (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),
+        ),
+      );
     } catch (error) {
       console.error("Erro ao carregar painel admin:", error);
+      alert("Erro ao carregar painel admin.");
     }
   }
 
@@ -66,7 +110,6 @@ function AdminContent() {
 
   async function handleAdminLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-
     setErro("");
     setLogging(true);
 
@@ -86,45 +129,166 @@ function AdminContent() {
     }
   }
 
-  async function handleAdminLogout() {
-    await signOut(adminAuth);
-    setProducts([]);
-    setSales([]);
+  async function changeSaleStatus(id: string, status: SaleStatus) {
+    const previousSales = sales;
+
+    setUpdatingSaleId(id);
+
+    setSales((currentSales) =>
+      currentSales.map((sale) =>
+        sale.id === id ? { ...sale, status, updatedAt: Date.now() } : sale,
+      ),
+    );
+
+    try {
+      await updateSaleStatus(id, status);
+      await load();
+    } catch (error) {
+      console.error("Erro ao atualizar status:", error);
+      setSales(previousSales);
+      alert("Erro ao atualizar status da venda.");
+    } finally {
+      setUpdatingSaleId(null);
+    }
   }
 
-  const stats = useMemo(() => {
-    const month = new Date().getMonth();
-    const year = new Date().getFullYear();
+  const periodSales = useMemo(() => {
+    return sales.filter((sale) => {
+      if (!sale.createdAt) return false;
 
-    const validSales = sales.filter((sale) => sale.status !== "cancelado");
-
-    const monthSales = validSales.filter((sale) => {
       const date = new Date(sale.createdAt);
-      return date.getMonth() === month && date.getFullYear() === year;
+
+      if (Number.isNaN(date.getTime())) return false;
+
+      const saleDay = String(date.getDate());
+      const saleMonth = String(date.getMonth() + 1);
+      const saleYear = String(date.getFullYear());
+
+      if (filterYear && saleYear !== filterYear) return false;
+      if (filterMonth && saleMonth !== filterMonth) return false;
+      if (filterDay && saleDay !== filterDay) return false;
+
+      return true;
     });
+  }, [sales, filterDay, filterMonth, filterYear]);
+
+  const dashboard = useMemo(() => {
+    const validSales = periodSales.filter((sale) => sale.status !== "cancelado");
+
+    const paidSales = periodSales.filter((sale) => sale.status === "pago");
+
+    const pendingSales = periodSales.filter(
+      (sale) => sale.status === "aguardando_pagamento",
+    );
+
+    const preparingSales = periodSales.filter((sale) =>
+      ["separando", "pronto_envio", "pronto_retirada"].includes(sale.status),
+    );
+
+    const canceledSales = periodSales.filter(
+      (sale) => sale.status === "cancelado",
+    );
+
+    const cancelRequests = periodSales.filter(
+      (sale) => sale.status === "cancelamento_solicitado",
+    );
+
+    const availableProducts = products.filter(
+      (product) => product.status === "disponivel",
+    );
+
+    const lowStockProducts = availableProducts.filter(
+      (product) => Number(product.stock || 0) <= 1,
+    );
+
+    const soldProducts = products.filter(
+      (product) => product.status === "vendido",
+    );
+
+    const reservedProducts = products.filter(
+      (product) => product.status === "reservado",
+    );
+
+    const periodRevenue = validSales.reduce(
+      (sum, sale) => sum + Number(sale.total || 0),
+      0,
+    );
+
+    const paidRevenue = paidSales.reduce(
+      (sum, sale) => sum + Number(sale.total || 0),
+      0,
+    );
+
+    const ticket =
+      paidSales.length > 0 ? paidRevenue / paidSales.length : 0;
 
     return {
-      available: products.filter((product) => product.status === "disponivel")
-        .length,
-      reserved: products.filter((product) => product.status === "reservado")
-        .length,
-      sold: products.filter((product) => product.status === "vendido").length,
-      archived: products.filter((product) => product.status === "arquivado")
-        .length,
-      stock: products.reduce(
+      periodSales: periodSales.length,
+      validSales: validSales.length,
+      paidSales: paidSales.length,
+      pendingSales: pendingSales.length,
+      preparingSales: preparingSales.length,
+      canceledSales: canceledSales.length,
+      cancelRequests: cancelRequests.length,
+      periodRevenue,
+      paidRevenue,
+      ticket,
+      availableProducts: availableProducts.length,
+      soldProducts: soldProducts.length,
+      reservedProducts: reservedProducts.length,
+      lowStockProducts: lowStockProducts.length,
+      totalStock: products.reduce(
         (sum, product) => sum + Number(product.stock || 0),
         0,
       ),
-      salesCount: validSales.length,
-      revenue: monthSales.reduce(
-        (sum, sale) => sum + Number(sale.total || 0),
-        0,
-      ),
     };
-  }, [products, sales]);
+  }, [periodSales, products]);
+
+  const recentSales = periodSales.slice(0, 5);
+
+  const strategicAlerts = useMemo(() => {
+    const alerts: string[] = [];
+
+    if (dashboard.pendingSales > 0) {
+      alerts.push(`${dashboard.pendingSales} venda(s) aguardando pagamento.`);
+    }
+
+    if (dashboard.preparingSales > 0) {
+      alerts.push(`${dashboard.preparingSales} pedido(s) em separação/envio.`);
+    }
+
+    if (dashboard.cancelRequests > 0) {
+      alerts.push(`${dashboard.cancelRequests} solicitação(ões) de cancelamento.`);
+    }
+
+    if (dashboard.lowStockProducts > 0) {
+      alerts.push(`${dashboard.lowStockProducts} produto(s) com estoque baixo.`);
+    }
+
+    if (!alerts.length) {
+      alerts.push("Nenhum alerta crítico no período selecionado.");
+    }
+
+    return alerts.slice(0, 4);
+  }, [dashboard]);
+
+  const lowStockPreview = products
+    .filter(
+      (product) =>
+        product.status === "disponivel" && Number(product.stock || 0) <= 1,
+    )
+    .slice(0, 5);
+
+  function clearPeriod() {
+    setFilterDay("");
+    setFilterMonth("");
+    setFilterYear("");
+  }
 
   if (loading) {
-    return <main className="container pb-5">Carregando...</main>;
+    return (
+      <main className="container-fluid px-3 px-lg-4 py-5">Carregando...</main>
+    );
   }
 
   if (!adminUser || !isAdmin) {
@@ -213,9 +377,9 @@ function AdminContent() {
   }
 
   return (
-    <main className="container pb-5">
+    <main className="container-fluid px-3 px-lg-4 pb-5">
       <div
-        className="mb-4 p-4 text-center"
+        className="mb-4 p-4"
         style={{
           background: theme.ivory2,
           borderRadius: 24,
@@ -223,52 +387,347 @@ function AdminContent() {
           border: `1px solid ${theme.border}`,
         }}
       >
-        <div className="d-flex justify-content-between align-items-center gap-3 flex-wrap">
-          <div className="text-start">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
+          <div>
             <h1 className="fw-bold mb-1">Painel Administrativo</h1>
 
             <p className="mb-0" style={{ color: theme.brownSoft }}>
-              Visão geral da loja e das vendas.
+              Visão estratégica da loja, vendas, estoque e pendências.
             </p>
           </div>
 
           <button
             type="button"
-            onClick={handleAdminLogout}
-            className="btn btn-outline-secondary"
-            style={{ borderRadius: 999 }}
+            onClick={load}
+            className="btn btn-sm"
+            style={{
+              background: theme.brownDark,
+              color: "#fff",
+              borderRadius: 999,
+              padding: "9px 16px",
+            }}
           >
-            <LogOut size={16} className="me-1" />
-            Sair do admin
+            <RefreshCw size={15} className="me-1" />
+            Atualizar
           </button>
         </div>
       </div>
 
-      <div className="row g-3">
+      <div
+        className="mb-4 p-3"
+        style={{
+          background: theme.ivory2,
+          borderRadius: 24,
+          boxShadow: theme.shadow,
+          border: `1px solid ${theme.border}`,
+        }}
+      >
+        <div className="row g-2 align-items-end">
+          <div className="col-12 col-md-3">
+            <label className="form-label">Dia</label>
+            <select
+              className="form-select"
+              value={filterDay}
+              onChange={(event) => setFilterDay(event.target.value)}
+            >
+              <option value="">Todos os dias</option>
+
+              {Array.from({ length: 31 }).map((_, index) => (
+                <option key={index + 1} value={String(index + 1)}>
+                  {index + 1}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="col-12 col-md-3">
+            <label className="form-label">Mês</label>
+            <select
+              className="form-select"
+              value={filterMonth}
+              onChange={(event) => setFilterMonth(event.target.value)}
+            >
+              <option value="">Todos os meses</option>
+              <option value="1">Janeiro</option>
+              <option value="2">Fevereiro</option>
+              <option value="3">Março</option>
+              <option value="4">Abril</option>
+              <option value="5">Maio</option>
+              <option value="6">Junho</option>
+              <option value="7">Julho</option>
+              <option value="8">Agosto</option>
+              <option value="9">Setembro</option>
+              <option value="10">Outubro</option>
+              <option value="11">Novembro</option>
+              <option value="12">Dezembro</option>
+            </select>
+          </div>
+
+          <div className="col-12 col-md-3">
+            <label className="form-label">Ano</label>
+            <select
+              className="form-select"
+              value={filterYear}
+              onChange={(event) => setFilterYear(event.target.value)}
+            >
+              <option value="">Todos os anos</option>
+
+              {Array.from({ length: 6 }).map((_, index) => {
+                const year = new Date().getFullYear() - index;
+
+                return (
+                  <option key={year} value={String(year)}>
+                    {year}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          <div className="col-12 col-md-3">
+            <button
+              type="button"
+              className="btn btn-outline-secondary w-100"
+              onClick={clearPeriod}
+              style={{ borderRadius: 999 }}
+            >
+              Limpar período
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="row g-3 mb-4">
         {[
-          ["Produtos disponíveis", stats.available],
-          ["Produtos reservados", stats.reserved],
-          ["Produtos vendidos", stats.sold],
-          ["Produtos arquivados", stats.archived],
-          ["Estoque total", stats.stock],
-          ["Vendas registradas", stats.salesCount],
-          ["Faturamento mensal", formatMoney(stats.revenue)],
-        ].map(([label, value]) => (
-          <div className="col-md-4" key={String(label)}>
+          ["Vendas no período", dashboard.periodSales, <ShoppingBag size={22} />],
+          ["Pagas", dashboard.paidSales, <TrendingUp size={22} />],
+          ["Aguardando pagamento", dashboard.pendingSales, <AlertTriangle size={22} />],
+          ["Em separação/envio", dashboard.preparingSales, <Package size={22} />],
+          ["Faturamento no período", formatMoney(dashboard.periodRevenue), <TrendingUp size={22} />],
+          ["Receita paga", formatMoney(dashboard.paidRevenue), <TrendingUp size={22} />],
+          ["Ticket médio", formatMoney(dashboard.ticket), <ShoppingBag size={22} />],
+          ["Produtos disponíveis", dashboard.availableProducts, <Package size={22} />],
+          ["Estoque total", dashboard.totalStock, <Package size={22} />],
+          ["Estoque baixo", dashboard.lowStockProducts, <AlertTriangle size={22} />],
+          ["Reservados", dashboard.reservedProducts, <Package size={22} />],
+          ["Vendidos", dashboard.soldProducts, <ShoppingBag size={22} />],
+        ].map(([label, value, icon]) => (
+          <div className="col-6 col-xl-3" key={String(label)}>
             <div
-              className="p-4 h-100"
+              className="p-3 h-100"
               style={{
                 background: theme.ivory2,
-                borderRadius: 24,
+                borderRadius: 20,
                 boxShadow: theme.shadow,
                 border: `1px solid ${theme.border}`,
               }}
             >
-              <small style={{ color: theme.brownSoft }}>{label}</small>
-              <h3 className="fw-bold mb-0">{value}</h3>
+              <div className="d-flex justify-content-between align-items-center gap-2">
+                <small style={{ color: theme.brownSoft }}>{label}</small>
+                <span style={{ color: theme.brown }}>{icon}</span>
+              </div>
+
+              <h4 className="fw-bold mb-0 mt-2">{value}</h4>
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="row g-4">
+        <div className="col-12 col-xl-4">
+          <section
+            className="h-100"
+            style={{
+              background: theme.ivory2,
+              borderRadius: 24,
+              boxShadow: theme.shadow,
+              border: `1px solid ${theme.border}`,
+              overflow: "hidden",
+            }}
+          >
+            <div className="p-3 border-bottom">
+              <h4 className="fw-bold mb-1">Resumo estratégico</h4>
+              <p className="mb-0" style={{ color: theme.brownSoft }}>
+                Pontos que precisam de atenção.
+              </p>
+            </div>
+
+            <div className="p-3">
+              {strategicAlerts.map((alert) => (
+                <div
+                  key={alert}
+                  className="mb-2 p-3"
+                  style={{
+                    background: "#fffaf2",
+                    borderRadius: 16,
+                    border: `1px solid ${theme.border}`,
+                  }}
+                >
+                  <AlertTriangle size={16} className="me-2" />
+                  {alert}
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <div className="col-12 col-xl-5">
+          <section
+            className="h-100"
+            style={{
+              background: theme.ivory2,
+              borderRadius: 24,
+              boxShadow: theme.shadow,
+              border: `1px solid ${theme.border}`,
+              overflow: "hidden",
+            }}
+          >
+            <div className="p-3 border-bottom">
+              <h4 className="fw-bold mb-1">Últimas vendas do período</h4>
+              <p className="mb-0" style={{ color: theme.brownSoft }}>
+                Pequena visão com status editável.
+              </p>
+            </div>
+
+            <div className="table-responsive">
+              <table className="table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Pedido</th>
+                    <th>Cliente</th>
+                    <th>Total</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {recentSales.map((sale) => {
+                    const isUpdating = updatingSaleId === sale.id;
+
+                    return (
+                      <tr key={sale.id}>
+                        <td>
+                          <strong>#{sale.id.slice(0, 8)}</strong>
+                          <div style={{ fontSize: 12, color: theme.brownSoft }}>
+                            {formatDate(sale.createdAt)}
+                          </div>
+                        </td>
+
+                        <td style={{ minWidth: 180 }}>
+                          <strong>
+                            {sale.customer?.name || "Cliente não informado"}
+                          </strong>
+                        </td>
+
+                        <td>
+                          <strong>{formatMoney(sale.total || 0)}</strong>
+                        </td>
+
+                        <td style={{ minWidth: 200 }}>
+                          <select
+                            className="form-select form-select-sm"
+                            value={sale.status}
+                            disabled={isUpdating}
+                            onChange={(event) =>
+                              changeSaleStatus(
+                                sale.id,
+                                event.target.value as SaleStatus,
+                              )
+                            }
+                            style={{
+                              borderRadius: 999,
+                              border: `1px solid ${theme.border}`,
+                              fontWeight: 700,
+                              color: theme.brownDark,
+                            }}
+                          >
+                            {statuses.map((status) => (
+                              <option key={status} value={status}>
+                                {statusLabel(status)}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {!recentSales.length && (
+                    <tr>
+                      <td colSpan={4} className="text-center py-4">
+                        Nenhuma venda nesse período.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div className="col-12 col-xl-3">
+          <section
+            className="h-100"
+            style={{
+              background: theme.ivory2,
+              borderRadius: 24,
+              boxShadow: theme.shadow,
+              border: `1px solid ${theme.border}`,
+              overflow: "hidden",
+            }}
+          >
+            <div className="p-3 border-bottom">
+              <h4 className="fw-bold mb-1">Estoque baixo</h4>
+              <p className="mb-0" style={{ color: theme.brownSoft }}>
+                Até 5 produtos críticos.
+              </p>
+            </div>
+
+            <div className="p-3">
+              {lowStockPreview.map((product) => (
+                <div
+                  key={product.id}
+                  className="d-flex align-items-center gap-3 mb-3 p-2"
+                  style={{
+                    background: "#fffaf2",
+                    borderRadius: 16,
+                    border: `1px solid ${theme.border}`,
+                  }}
+                >
+                  <img
+                    src={product.images?.[0] || ""}
+                    alt={product.name}
+                    style={{
+                      width: 54,
+                      height: 64,
+                      objectFit: "contain",
+                      background: "#f3eadf",
+                      borderRadius: 12,
+                    }}
+                  />
+
+                  <div>
+                    <strong>{product.name}</strong>
+
+                    <div style={{ fontSize: 13, color: theme.brownSoft }}>
+                      Estoque: {Number(product.stock || 0)}
+                    </div>
+
+                    <div style={{ fontSize: 13 }}>
+                      {formatMoney(product.price || 0)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {!lowStockPreview.length && (
+                <div className="alert alert-success mb-0">
+                  Nenhum produto crítico.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       </div>
     </main>
   );

@@ -130,8 +130,8 @@ function CarrinhoContent() {
 
   async function loadAddresses(userId: string) {
     const list = await getCustomerAddresses(userId);
-    setAddresses(list);
 
+    setAddresses(list);
     setSelectedAddressId("");
     setCepDestino("");
     setSelectedShipping(null);
@@ -525,20 +525,6 @@ function CarrinhoContent() {
 
       await saveCustomerData(user.uid, finalCustomer);
 
-      const response = await fetch("/api/mercadopago", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items, deliveryPrice, customer: finalCustomer }),
-      });
-
-      const payment = await response.json();
-
-      if (!response.ok) {
-        console.error("Erro Mercado Pago:", payment);
-        alert(payment.error || "Erro ao gerar pagamento.");
-        return;
-      }
-
       const saleId = await createSale({
         userId: user.uid,
         customer: finalCustomer,
@@ -549,17 +535,44 @@ function CarrinhoContent() {
         deliveryType,
         deliveryPrice,
         shippingOption: selectedShipping,
-        paymentUrl: payment.init_point || "",
-        mercadoPagoPreferenceId: payment.id || "",
+        paymentUrl: "",
+        mercadoPagoPreferenceId: "",
       });
 
-      clearCart();
+      const response = await fetch("/api/mercadopago", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          items,
+          deliveryPrice,
+          customer: finalCustomer,
+          saleId,
+        }),
+      });
+
+      const payment = await response.json();
+
+      if (!response.ok) {
+        console.error("Erro Mercado Pago:", payment);
+        alert(payment.error || "Erro ao gerar pagamento.");
+        return;
+      }
 
       if (payment.init_point) {
+        clearCart();
         window.location.href = payment.init_point;
-      } else {
-        router.push(`/obrigado?pedido=${saleId}`);
+        return;
       }
+
+      if (payment.sandbox_init_point) {
+        clearCart();
+        window.location.href = payment.sandbox_init_point;
+        return;
+      }
+
+      router.push(`/obrigado?pedido=${saleId}`);
     } catch (error) {
       console.error("Erro ao finalizar compra:", error);
       alert("Erro ao finalizar compra.");
@@ -622,7 +635,7 @@ function CarrinhoContent() {
 
                     <strong>{formatMoney(item.price)}</strong>
 
-                    <div className="d-flex align-items-center gap-2 mt-3">
+                    <div className="d-flex align-items-center gap-2 mt-3 flex-wrap">
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-secondary"
@@ -872,6 +885,7 @@ function CarrinhoContent() {
                   }}
                 >
                   <strong>Para finalizar:</strong> faça login ou crie uma conta.
+
                   <div className="d-grid gap-2 mt-3">
                     <button
                       type="button"
@@ -957,7 +971,7 @@ function CarrinhoContent() {
                   borderRadius: 999,
                 }}
               >
-                {loading ? "Finalizando..." : "Finalizar com Mercado Pago"}
+                {loading ? "Abrindo pagamento..." : "Finalizar com Mercado Pago"}
               </button>
             </div>
           </div>
@@ -1285,6 +1299,7 @@ function CarrinhoContent() {
               />
 
               <label className="form-label">Senha</label>
+
               <div className="input-group mb-3">
                 <input
                   className="form-control"

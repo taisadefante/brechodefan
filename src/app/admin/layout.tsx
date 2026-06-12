@@ -3,44 +3,26 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, LogOut, Package, ShoppingBag } from "lucide-react";
-import { useEffect, useState } from "react";
-import { onAuthStateChanged, signOut, User } from "firebase/auth";
+import {
+  BarChart3,
+  DollarSign,
+  LogOut,
+  Package,
+  ShoppingBag,
+} from "lucide-react";
 
-import { adminAuth } from "@/lib/firebase-admin-auth";
+import {
+  AdminAuthProvider,
+  useAdminAuth,
+} from "@/contexts/AdminAuthContext";
+
 import { theme } from "@/lib/theme";
 
-const ADMIN_EMAIL =
-  process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() ||
-  "taisadefante@hotmail.com";
-
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+function AdminLayoutContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-
-  const [adminUser, setAdminUser] = useState<User | null>(null);
-  const [loadingAdmin, setLoadingAdmin] = useState(true);
-
-  const isAdmin =
-    !!adminUser?.email && adminUser.email.toLowerCase() === ADMIN_EMAIL;
+  const { adminUser, loadingAdmin, isAdmin, adminLogout } = useAdminAuth();
 
   const showMenu = Boolean(adminUser && isAdmin);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(adminAuth, (currentUser) => {
-      setAdminUser(currentUser);
-      setLoadingAdmin(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  async function adminLogout() {
-    await signOut(adminAuth);
-  }
 
   function menuButtonStyle(active: boolean): React.CSSProperties {
     return {
@@ -93,9 +75,7 @@ export default function AdminLayout({
                     alt="Defan Brechó"
                     width={64}
                     height={64}
-                    style={{
-                      objectFit: "contain",
-                    }}
+                    style={{ objectFit: "contain" }}
                     priority
                   />
                 </div>
@@ -159,6 +139,15 @@ export default function AdminLayout({
                 <ShoppingBag size={16} className="me-1" />
                 Vendas
               </Link>
+
+              <Link
+                href="/admin/faturamento"
+                className="btn"
+                style={menuButtonStyle(pathname === "/admin/faturamento")}
+              >
+                <DollarSign size={16} className="me-1" />
+                Faturamento
+              </Link>
             </nav>
           </div>
         </header>
@@ -166,5 +155,13 @@ export default function AdminLayout({
 
       {children}
     </>
+  );
+}
+
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <AdminAuthProvider>
+      <AdminLayoutContent>{children}</AdminLayoutContent>
+    </AdminAuthProvider>
   );
 }

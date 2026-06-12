@@ -1,7 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, Printer, Tag, X } from "lucide-react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Printer,
+  RefreshCw,
+  Tag,
+  X,
+} from "lucide-react";
 
 import {
   approveCancelSale,
@@ -137,9 +144,9 @@ function getCustomerDocument(customer?: CustomerWithDocument | null) {
 }
 
 function deliveryTypeLabel(type?: string) {
-  if (type === "envio") return "Envio pelos Correios/transportadora";
-  if (type === "retirada") return "Retirada em Realengo/RJ";
-  if (type === "combinar_whatsapp") return "Uber/99 Entrega via WhatsApp";
+  if (type === "envio") return "Envio";
+  if (type === "retirada") return "Retirada";
+  if (type === "combinar_whatsapp") return "Uber/99";
 
   return type || "Não informado";
 }
@@ -171,7 +178,7 @@ function InfoItem({
   value: React.ReactNode;
 }) {
   return (
-    <div className="col-md-4">
+    <div className="col-12 col-sm-6 col-xl-3">
       <small style={{ color: theme.brownSoft }}>{label}</small>
       <p className="fw-bold mb-0">{value || "Não informado"}</p>
     </div>
@@ -191,10 +198,103 @@ function AdminVendasContent() {
     Record<string, boolean>
   >({});
 
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"todos" | SaleStatus>(
+    "todos",
+  );
+  const [deliveryFilter, setDeliveryFilter] = useState("todos");
+  const [dateStart, setDateStart] = useState("");
+  const [dateEnd, setDateEnd] = useState("");
+  const [minValue, setMinValue] = useState("");
+  const [maxValue, setMaxValue] = useState("");
+
+  const filteredSales = useMemo(() => {
+    return sales.filter((sale) => {
+      const customerDocument = getCustomerDocument(sale.customer);
+
+      const searchText = [
+        sale.id,
+        sale.customer?.name,
+        sale.customer?.email,
+        sale.customer?.phone,
+        customerDocument,
+        sale.status,
+        sale.deliveryType,
+        sale.mercadoPagoPreferenceId,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      if (search.trim() && !searchText.includes(search.trim().toLowerCase())) {
+        return false;
+      }
+
+      if (statusFilter !== "todos" && sale.status !== statusFilter) {
+        return false;
+      }
+
+      if (deliveryFilter !== "todos" && sale.deliveryType !== deliveryFilter) {
+        return false;
+      }
+
+      const saleDate = sale.createdAt ? new Date(sale.createdAt).getTime() : 0;
+
+      if (dateStart) {
+        const start = new Date(`${dateStart}T00:00:00`).getTime();
+        if (saleDate < start) return false;
+      }
+
+      if (dateEnd) {
+        const end = new Date(`${dateEnd}T23:59:59`).getTime();
+        if (saleDate > end) return false;
+      }
+
+      if (minValue && Number(sale.total || 0) < Number(minValue)) {
+        return false;
+      }
+
+      if (maxValue && Number(sale.total || 0) > Number(maxValue)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    sales,
+    search,
+    statusFilter,
+    deliveryFilter,
+    dateStart,
+    dateEnd,
+    minValue,
+    maxValue,
+  ]);
+
+  const totals = useMemo(() => {
+    const validSales = filteredSales.filter((sale) => sale.status !== "cancelado");
+
+    return {
+      quantity: filteredSales.length,
+      paid: filteredSales.filter((sale) => sale.status === "pago").length,
+      pending: filteredSales.filter(
+        (sale) => sale.status === "aguardando_pagamento",
+      ).length,
+      revenue: validSales.reduce(
+        (sum, sale) => sum + Number(sale.total || 0),
+        0,
+      ),
+    };
+  }, [filteredSales]);
+
   async function load() {
     try {
       const list = (await getAllSales()) as SaleWithDocument[];
-      setSales(list);
+
+      const sorted = [...list].sort(
+        (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),
+      );
+
+      setSales(sorted);
     } catch (error) {
       console.error("Erro ao carregar vendas:", error);
       alert("Erro ao carregar vendas.");
@@ -294,16 +394,12 @@ function AdminVendasContent() {
     }
 
     if (!document) {
-      alert(
-        "CPF/CNPJ não encontrado nesta venda. Adicione o CPF/CNPJ do cliente nos dados da venda ou crie uma nova venda com documento válido.",
-      );
+      alert("CPF/CNPJ não encontrado nesta venda.");
       return null;
     }
 
     if (!isValidCpfOrCnpj(document)) {
-      alert(
-        "CPF/CNPJ inválido. O Melhor Envio exige CPF/CNPJ real e válido para simular ou gerar etiqueta.",
-      );
+      alert("CPF/CNPJ inválido para gerar etiqueta.");
       return null;
     }
 
@@ -339,24 +435,12 @@ function AdminVendasContent() {
       const data = await readApiResponse(response);
 
       if (!response.ok) {
-        console.error("Erro simulação etiqueta:", {
-          status: response.status,
-          statusText: response.statusText,
-          data,
-        });
-
-        showApiError(
-          data,
-          `Erro ao simular etiqueta. Status ${response.status}: ${response.statusText}`,
-        );
-
+        console.error("Erro simulação etiqueta:", data);
+        showApiError(data, "Erro ao simular etiqueta.");
         return;
       }
 
-      alert(
-        data.message ||
-          "Simulação concluída com sucesso. Nenhuma etiqueta foi comprada.",
-      );
+      alert(data.message || "Simulação concluída com sucesso.");
     } catch (error) {
       console.error("Erro ao simular etiqueta:", error);
       alert("Erro ao simular etiqueta.");
@@ -367,16 +451,12 @@ function AdminVendasContent() {
 
   function openGenerateLabelModal(sale: SaleWithDocument) {
     if (sale.status !== "pronto_envio") {
-      alert(
-        "Para comprar/gerar etiqueta, primeiro altere o status da venda para: Pronto para envio.",
-      );
+      alert("Altere o status para Pronto para envio antes de gerar etiqueta.");
       return;
     }
 
     if (sale.melhorEnvioOrderId || sale.melhorEnvioPrintUrl) {
-      alert(
-        "Essa venda já possui etiqueta gerada. Use o botão para abrir/imprimir novamente.",
-      );
+      alert("Essa venda já possui etiqueta gerada.");
       return;
     }
 
@@ -390,14 +470,8 @@ function AdminVendasContent() {
     if (!saleToGenerateLabel) return;
 
     const sale = saleToGenerateLabel;
-
-    if (sale.status !== "pronto_envio") {
-      alert("A venda precisa estar com status Pronto para envio.");
-      setSaleToGenerateLabel(null);
-      return;
-    }
-
     const customerForLabel = validateLabelData(sale);
+
     if (!customerForLabel) return;
 
     setGeneratingLabel((prev) => ({ ...prev, [sale.id]: true }));
@@ -420,17 +494,8 @@ function AdminVendasContent() {
       const data = await readApiResponse(response);
 
       if (!response.ok) {
-        console.error("Erro etiqueta:", {
-          status: response.status,
-          statusText: response.statusText,
-          data,
-        });
-
-        showApiError(
-          data,
-          `Erro ao gerar etiqueta. Status ${response.status}: ${response.statusText}`,
-        );
-
+        console.error("Erro etiqueta:", data);
+        showApiError(data, "Erro ao gerar etiqueta.");
         return;
       }
 
@@ -505,13 +570,25 @@ function AdminVendasContent() {
     printWindow.document.close();
   }
 
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("todos");
+    setDeliveryFilter("todos");
+    setDateStart("");
+    setDateEnd("");
+    setMinValue("");
+    setMaxValue("");
+  }
+
   if (loadingAdmin) {
-    return <main className="container pb-5">Carregando...</main>;
+    return (
+      <main className="container-fluid px-3 px-lg-4 pb-5">Carregando...</main>
+    );
   }
 
   if (!adminUser || !isAdmin) {
     return (
-      <main className="container pb-5">
+      <main className="container-fluid px-3 px-lg-4 pb-5">
         <div className="alert alert-danger">
           Acesso restrito. Entre pelo painel admin.
         </div>
@@ -520,7 +597,7 @@ function AdminVendasContent() {
   }
 
   return (
-    <main className="container pb-5">
+    <main className="container-fluid px-3 px-lg-4 pb-5">
       {saleToGenerateLabel && (
         <div
           style={{
@@ -548,6 +625,7 @@ function AdminVendasContent() {
             <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
               <div>
                 <h4 className="fw-bold mb-1">Confirmar geração de etiqueta</h4>
+
                 <p className="mb-0" style={{ color: theme.brownSoft }}>
                   Essa ação pode comprar a etiqueta no Melhor Envio.
                 </p>
@@ -556,7 +634,12 @@ function AdminVendasContent() {
               <button
                 type="button"
                 className="btn btn-sm btn-outline-secondary"
-                style={{ borderRadius: 999 }}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "50%",
+                  padding: 0,
+                }}
                 onClick={() => setSaleToGenerateLabel(null)}
                 disabled={Boolean(generatingLabel[saleToGenerateLabel.id])}
               >
@@ -594,8 +677,7 @@ function AdminVendasContent() {
             </div>
 
             <div className="alert alert-warning py-2">
-              Confira se o pedido está realmente <strong>pronto para envio</strong>,
-              com produto separado, embalagem conferida e dados do cliente corretos.
+              Confira se o pedido está realmente pronto para envio.
             </div>
 
             <div className="d-flex flex-wrap justify-content-end gap-2 mt-3">
@@ -630,7 +712,7 @@ function AdminVendasContent() {
       )}
 
       <div
-        className="mb-4 p-4 text-center"
+        className="mb-4 p-4"
         style={{
           background: theme.ivory2,
           borderRadius: 24,
@@ -638,20 +720,12 @@ function AdminVendasContent() {
           border: `1px solid ${theme.border}`,
         }}
       >
-        <h1 className="fw-bold mb-1">Vendas</h1>
-
-        <p className="mb-0" style={{ color: theme.brownSoft }}>
-          Gerencie pedidos, pagamentos, frete e etiquetas.
-        </p>
-      </div>
-
-      <section>
-        <div className="d-flex justify-content-between align-items-center mb-3">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
           <div>
-            <h2 className="fw-bold mb-1">Vendas registradas</h2>
+            <h1 className="fw-bold mb-1">Vendas</h1>
 
             <p className="mb-0" style={{ color: theme.brownSoft }}>
-              Clique em uma venda para ver todos os dados.
+              Lista responsiva com filtros, dados principais e status editável.
             </p>
           </div>
 
@@ -664,443 +738,676 @@ function AdminVendasContent() {
               background: theme.brownDark,
               color: "#fff",
               borderRadius: 999,
-              opacity: updatingSaleId ? 0.7 : 1,
+              padding: "9px 16px",
             }}
           >
+            <RefreshCw size={15} className="me-1" />
             Atualizar
           </button>
         </div>
+      </div>
 
-        {sales.map((sale) => {
-          const isOpen = openSaleId === sale.id;
-          const shippingAddress = sale.shippingAddress || null;
-          const customerDocument = getCustomerDocument(sale.customer);
-          const isUpdatingThisSale = updatingSaleId === sale.id;
-
-          const canBuyLabel =
-            sale.status === "pronto_envio" &&
-            !sale.melhorEnvioOrderId &&
-            !sale.melhorEnvioPrintUrl;
-
-          return (
+      <div className="row g-3 mb-4">
+        {[
+          ["Vendas filtradas", totals.quantity],
+          ["Pagas", totals.paid],
+          ["Aguardando pagamento", totals.pending],
+          ["Valor filtrado", formatMoney(totals.revenue)],
+        ].map(([label, value]) => (
+          <div className="col-6 col-xl-3" key={String(label)}>
             <div
-              key={sale.id}
-              className="mb-3"
+              className="p-3 h-100"
               style={{
                 background: theme.ivory2,
-                borderRadius: 26,
+                borderRadius: 20,
                 boxShadow: theme.shadow,
                 border: `1px solid ${theme.border}`,
-                overflow: "hidden",
               }}
             >
+              <small style={{ color: theme.brownSoft }}>{label}</small>
+              <h4 className="fw-bold mb-0">{value}</h4>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <section
+        style={{
+          background: theme.ivory2,
+          borderRadius: 24,
+          boxShadow: theme.shadow,
+          border: `1px solid ${theme.border}`,
+          overflow: "hidden",
+        }}
+      >
+        <div className="p-3 border-bottom">
+          <h2 className="fw-bold mb-1">Vendas registradas</h2>
+          <p className="mb-0" style={{ color: theme.brownSoft }}>
+            Use os filtros para localizar pedidos rapidamente.
+          </p>
+        </div>
+
+        <div
+          className="p-3 border-bottom"
+          style={{
+            background: "#fffaf2",
+          }}
+        >
+          <div className="row g-2 align-items-end">
+            <div className="col-12 col-xl-3">
+              <label className="form-label">Buscar</label>
+              <input
+                className="form-control"
+                placeholder="Pedido, cliente, e-mail, telefone ou CPF"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </div>
+
+            <div className="col-6 col-md-4 col-xl-2">
+              <label className="form-label">Status</label>
+              <select
+                className="form-select"
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as "todos" | SaleStatus)
+                }
+              >
+                <option value="todos">Todos</option>
+
+                {statuses.map((status) => (
+                  <option key={status} value={status}>
+                    {statusLabel(status)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="col-6 col-md-4 col-xl-2">
+              <label className="form-label">Entrega</label>
+              <select
+                className="form-select"
+                value={deliveryFilter}
+                onChange={(event) => setDeliveryFilter(event.target.value)}
+              >
+                <option value="todos">Todas</option>
+                <option value="envio">Envio</option>
+                <option value="retirada">Retirada</option>
+                <option value="combinar_whatsapp">Uber/99</option>
+              </select>
+            </div>
+
+            <div className="col-6 col-md-4 col-xl-2">
+              <label className="form-label">Data inicial</label>
+              <input
+                type="date"
+                className="form-control"
+                value={dateStart}
+                onChange={(event) => setDateStart(event.target.value)}
+              />
+            </div>
+
+            <div className="col-6 col-md-4 col-xl-2">
+              <label className="form-label">Data final</label>
+              <input
+                type="date"
+                className="form-control"
+                value={dateEnd}
+                onChange={(event) => setDateEnd(event.target.value)}
+              />
+            </div>
+
+            <div className="col-6 col-md-4 col-xl-1">
+              <label className="form-label">Mín.</label>
+              <input
+                type="number"
+                className="form-control"
+                value={minValue}
+                onChange={(event) => setMinValue(event.target.value)}
+              />
+            </div>
+
+            <div className="col-6 col-md-4 col-xl-1">
+              <label className="form-label">Máx.</label>
+              <input
+                type="number"
+                className="form-control"
+                value={maxValue}
+                onChange={(event) => setMaxValue(event.target.value)}
+              />
+            </div>
+
+            <div className="col-12 col-xl-1">
               <button
                 type="button"
-                onClick={() => setOpenSaleId(isOpen ? null : sale.id)}
-                className="w-100 text-start"
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  padding: 20,
-                }}
+                className="btn btn-outline-secondary w-100"
+                onClick={clearFilters}
+                style={{ borderRadius: 999 }}
               >
-                <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
-                  <div>
-                    <h5 className="fw-bold mb-1">
-                      Pedido #{sale.id.slice(0, 8)}
-                    </h5>
-
-                    <p className="mb-0" style={{ color: theme.brownSoft }}>
-                      {sale.customer?.name || "Cliente não informado"} •{" "}
-                      {sale.items?.length || 0} produto(s)
-                    </p>
-                  </div>
-
-                  <div className="d-flex flex-wrap align-items-center gap-2">
-                    <span
-                      className="badge"
-                      style={{
-                        background: theme.brown,
-                        padding: "8px 10px",
-                      }}
-                    >
-                      {isUpdatingThisSale
-                        ? "Salvando..."
-                        : statusLabel(sale.status)}
-                    </span>
-
-                    <strong>{formatMoney(sale.total || 0)}</strong>
-
-                    {isOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                  </div>
-                </div>
+                Limpar
               </button>
+            </div>
+          </div>
+        </div>
 
-              {isOpen && (
-                <div
-                  id={`sale-print-${sale.id}`}
-                  style={{
-                    borderTop: `1px solid ${theme.border}`,
-                    padding: 20,
-                  }}
-                >
-                  <div className="row g-3 mb-3">
-                    <InfoItem label="ID completo do pedido" value={`#${sale.id}`} />
-                    <InfoItem label="ID do usuário" value={text(sale.userId)} />
-                    <InfoItem label="Status" value={statusLabel(sale.status)} />
-                    <InfoItem label="Criado em" value={formatDate(sale.createdAt)} />
-                    <InfoItem label="Atualizado em" value={formatDate(sale.updatedAt)} />
+        <div className="table-responsive">
+          <table className="table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Pedido</th>
+                <th>Data</th>
+                <th>Cliente</th>
+                <th>Itens</th>
+                <th>Entrega</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th style={{ width: 90, textAlign: "center" }}>Detalhes</th>
+              </tr>
+            </thead>
 
-                    <InfoItem
-                      label="Tipo de entrega"
-                      value={deliveryTypeLabel(sale.deliveryType)}
-                    />
+            <tbody>
+              {filteredSales.map((sale) => {
+                const isOpen = openSaleId === sale.id;
+                const shippingAddress = sale.shippingAddress || null;
+                const customerDocument = getCustomerDocument(sale.customer);
+                const isUpdatingThisSale = updatingSaleId === sale.id;
 
-                    <InfoItem label="Nome" value={text(sale.customer?.name)} />
+                const canBuyLabel =
+                  sale.status === "pronto_envio" &&
+                  !sale.melhorEnvioOrderId &&
+                  !sale.melhorEnvioPrintUrl;
 
-                    <InfoItem
-                      label="CPF/CNPJ"
-                      value={
-                        customerDocument
-                          ? formatCpfCnpj(customerDocument)
-                          : "Não informado"
-                      }
-                    />
+                return (
+                  <>
+                    <tr key={sale.id}>
+                      <td>
+                        <strong>#{sale.id.slice(0, 8)}</strong>
 
-                    <InfoItem label="E-mail" value={text(sale.customer?.email)} />
+                        <div style={{ fontSize: 12, color: theme.brownSoft }}>
+                          {sale.mercadoPagoPreferenceId
+                            ? `MP: ${sale.mercadoPagoPreferenceId}`
+                            : "Sem preferência MP"}
+                        </div>
+                      </td>
 
-                    <InfoItem
-                      label="Telefone/WhatsApp"
-                      value={text(sale.customer?.phone)}
-                    />
+                      <td style={{ minWidth: 150 }}>
+                        {formatDate(sale.createdAt)}
+                      </td>
 
-                    <InfoItem label="CEP" value={text(sale.customer?.cep)} />
+                      <td style={{ minWidth: 220 }}>
+                        <strong>
+                          {sale.customer?.name || "Cliente não informado"}
+                        </strong>
 
-                    <InfoItem
-                      label="Rua/Avenida"
-                      value={text(sale.customer?.address)}
-                    />
+                        <div style={{ fontSize: 12, color: theme.brownSoft }}>
+                          {sale.customer?.email || "E-mail não informado"}
+                        </div>
 
-                    <InfoItem label="Número" value={text(sale.customer?.number)} />
+                        <div style={{ fontSize: 12, color: theme.brownSoft }}>
+                          {sale.customer?.phone || "Telefone não informado"}
+                        </div>
+                      </td>
 
-                    <InfoItem
-                      label="Complemento"
-                      value={text(sale.customer?.complement)}
-                    />
+                      <td>
+                        <strong>{sale.items?.length || 0}</strong>
+                      </td>
 
-                    <InfoItem label="Bairro" value={text(sale.customer?.district)} />
-                    <InfoItem label="Cidade" value={text(sale.customer?.city)} />
-                    <InfoItem label="Estado" value={text(sale.customer?.state)} />
+                      <td>{deliveryTypeLabel(sale.deliveryType)}</td>
 
-                    <InfoItem
-                      label="Endereço salvo"
-                      value={
-                        shippingAddress
-                          ? `${shippingAddress.address}, ${shippingAddress.number} - ${shippingAddress.city}/${shippingAddress.state}`
-                          : "Não informado"
-                      }
-                    />
+                      <td>
+                        <strong>{formatMoney(sale.total || 0)}</strong>
+                      </td>
 
-                    <InfoItem
-                      label="Transportadora"
-                      value={text(sale.shippingOption?.company)}
-                    />
-
-                    <InfoItem
-                      label="Serviço"
-                      value={text(sale.shippingOption?.name)}
-                    />
-
-                    <InfoItem
-                      label="Valor do frete"
-                      value={formatMoney(sale.deliveryPrice || 0)}
-                    />
-
-                    <InfoItem
-                      label="ID Melhor Envio"
-                      value={text(sale.melhorEnvioOrderId)}
-                    />
-
-                    <InfoItem
-                      label="Código de rastreio"
-                      value={text(sale.trackingCode)}
-                    />
-                  </div>
-
-                  <div
-                    className="p-3 mb-3"
-                    style={{
-                      background: "#fffaf2",
-                      borderRadius: 18,
-                      border: `1px solid ${theme.border}`,
-                    }}
-                  >
-                    <h6 className="fw-bold mb-3">Produtos comprados</h6>
-
-                    <div className="d-grid gap-2">
-                      {sale.items?.map((item) => (
-                        <div
-                          key={item.id}
-                          className="d-flex align-items-center gap-3 p-2"
+                      <td style={{ minWidth: 220 }}>
+                        <select
+                          className="form-select form-select-sm"
+                          value={sale.status}
+                          disabled={isUpdatingThisSale}
+                          onChange={(event) =>
+                            changeStatus(
+                              sale.id,
+                              event.target.value as SaleStatus,
+                            )
+                          }
                           style={{
-                            background: "#fff",
-                            borderRadius: 16,
+                            borderRadius: 999,
                             border: `1px solid ${theme.border}`,
+                            fontWeight: 700,
+                            color: theme.brownDark,
                           }}
                         >
-                          <img
-                            src={item.images?.[0] || ""}
-                            alt={item.name}
-                            style={{
-                              width: 70,
-                              height: 85,
-                              objectFit: "contain",
-                              background: "#f3eadf",
-                              borderRadius: 12,
-                            }}
-                          />
+                          {statuses.map((status) => (
+                            <option key={status} value={status}>
+                              {statusLabel(status)}
+                            </option>
+                          ))}
+                        </select>
 
-                          <div className="flex-grow-1">
-                            <strong>{item.name}</strong>
+                        {isUpdatingThisSale && (
+                          <small style={{ color: theme.brownSoft }}>
+                            Salvando...
+                          </small>
+                        )}
+                      </td>
 
-                            <div
-                              style={{
-                                fontSize: 13,
-                                color: theme.brownSoft,
-                              }}
-                            >
-                              {[item.category, item.size, item.color]
-                                .filter(Boolean)
-                                .join(" • ")}
-                            </div>
-
-                            <div style={{ fontSize: 13 }}>ID: {item.id}</div>
-
-                            <div style={{ fontSize: 13 }}>
-                              Quantidade: {item.quantity || 1}
-                            </div>
-
-                            <div style={{ fontSize: 13 }}>
-                              Valor unitário: {formatMoney(item.price || 0)}
-                            </div>
-                          </div>
-
-                          <strong>
-                            {formatMoney(
-                              Number(item.price || 0) *
-                                Number(item.quantity || 1),
-                            )}
-                          </strong>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div
-                    className="p-3 mb-3"
-                    style={{
-                      background: "#fffaf2",
-                      borderRadius: 18,
-                      border: `1px solid ${theme.border}`,
-                    }}
-                  >
-                    <h6 className="fw-bold mb-3">Resumo financeiro</h6>
-
-                    <p className="d-flex justify-content-between mb-1">
-                      <span>Subtotal dos produtos</span>
-                      <strong>{formatMoney(sale.subtotal || 0)}</strong>
-                    </p>
-
-                    <p className="d-flex justify-content-between mb-1">
-                      <span>Frete</span>
-                      <strong>{formatMoney(sale.deliveryPrice || 0)}</strong>
-                    </p>
-
-                    <hr />
-
-                    <h5 className="d-flex justify-content-between mb-0">
-                      <span>Total da venda</span>
-                      <strong>{formatMoney(sale.total || 0)}</strong>
-                    </h5>
-                  </div>
-
-                  <div
-                    className="p-3"
-                    style={{
-                      background: "#fffaf2",
-                      borderRadius: 18,
-                      border: `1px solid ${theme.border}`,
-                    }}
-                  >
-                    <h6 className="fw-bold mb-3">Ações da venda</h6>
-
-                    <label className="form-label">Status</label>
-
-                    <select
-                      className="form-select mb-2"
-                      value={sale.status}
-                      disabled={isUpdatingThisSale}
-                      onChange={(event) =>
-                        changeStatus(sale.id, event.target.value as SaleStatus)
-                      }
-                    >
-                      {statuses.map((status) => (
-                        <option key={status} value={status}>
-                          {statusLabel(status)}
-                        </option>
-                      ))}
-                    </select>
-
-                    {isUpdatingThisSale && (
-                      <small className="d-block mb-2 text-muted">
-                        Salvando alteração...
-                      </small>
-                    )}
-
-                    <label className="form-label">Código de rastreio</label>
-
-                    <input
-                      className="form-control mb-3"
-                      value={tracking[sale.id] ?? sale.trackingCode ?? ""}
-                      disabled={isUpdatingThisSale}
-                      onChange={(event) =>
-                        setTracking((prev) => ({
-                          ...prev,
-                          [sale.id]: event.target.value,
-                        }))
-                      }
-                      placeholder="Ex: BR123456789BR"
-                    />
-
-                    {sale.status !== "pronto_envio" &&
-                      !sale.melhorEnvioOrderId &&
-                      !sale.melhorEnvioPrintUrl && (
-                        <div className="alert alert-warning py-2">
-                          Para comprar/gerar etiqueta, altere o status para{" "}
-                          <strong>Pronto para envio</strong>.
-                        </div>
-                      )}
-
-                    <div className="d-flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        disabled={isUpdatingThisSale}
-                        style={{
-                          background: theme.brown,
-                          color: "#fff",
-                          borderRadius: 999,
-                          opacity: isUpdatingThisSale ? 0.7 : 1,
-                        }}
-                        onClick={() => changeStatus(sale.id, sale.status)}
-                      >
-                        {isUpdatingThisSale
-                          ? "Salvando..."
-                          : "Salvar rastreio/status"}
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary"
-                        disabled={
-                          isUpdatingThisSale ||
-                          generatingLabel[sale.id] ||
-                          Boolean(sale.melhorEnvioOrderId)
-                        }
-                        style={{ borderRadius: 999 }}
-                        onClick={() => simulateLabel(sale)}
-                      >
-                        <Tag size={15} className="me-1" />
-                        {generatingLabel[sale.id]
-                          ? "Simulando..."
-                          : "Simular etiqueta"}
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn btn-sm"
-                        disabled={
-                          isUpdatingThisSale ||
-                          generatingLabel[sale.id] ||
-                          !canBuyLabel
-                        }
-                        title={
-                          sale.status !== "pronto_envio"
-                            ? "Só é possível comprar/gerar etiqueta após colocar a venda como Pronto para envio."
-                            : ""
-                        }
-                        style={{
-                          background: canBuyLabel
-                            ? theme.brownDark
-                            : "#9ca3af",
-                          color: "#fff",
-                          borderRadius: 999,
-                          opacity:
-                            isUpdatingThisSale ||
-                            generatingLabel[sale.id] ||
-                            !canBuyLabel
-                              ? 0.7
-                              : 1,
-                          cursor: canBuyLabel ? "pointer" : "not-allowed",
-                        }}
-                        onClick={() => openGenerateLabelModal(sale)}
-                      >
-                        <Tag size={15} className="me-1" />
-                        {generatingLabel[sale.id]
-                          ? "Gerando..."
-                          : "Comprar/Gerar etiqueta"}
-                      </button>
-
-                      {sale.melhorEnvioPrintUrl && (
-                        <a
-                          href={sale.melhorEnvioPrintUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn btn-sm btn-outline-secondary"
-                          style={{ borderRadius: 999 }}
-                        >
-                          <Printer size={15} className="me-1" />
-                          Abrir / imprimir etiqueta
-                        </a>
-                      )}
-
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary"
-                        disabled={isUpdatingThisSale}
-                        style={{ borderRadius: 999 }}
-                        onClick={() => printSale(sale.id)}
-                      >
-                        <Printer size={15} className="me-1" />
-                        Imprimir pedido
-                      </button>
-
-                      {sale.status === "cancelamento_solicitado" && (
+                      <td className="text-center">
                         <button
                           type="button"
-                          className="btn btn-sm btn-outline-danger"
-                          disabled={isUpdatingThisSale}
-                          style={{ borderRadius: 999 }}
-                          onClick={() => approveCancel(sale.id)}
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() =>
+                            setOpenSaleId(isOpen ? null : sale.id)
+                          }
+                          style={{
+                            width: 38,
+                            height: 38,
+                            borderRadius: "50%",
+                            padding: 0,
+                          }}
                         >
-                          {isUpdatingThisSale
-                            ? "Aprovando..."
-                            : "Aprovar cancelamento"}
+                          {isOpen ? (
+                            <ChevronUp size={18} />
+                          ) : (
+                            <ChevronDown size={18} />
+                          )}
                         </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+                      </td>
+                    </tr>
 
-        {!sales.length && (
-          <div className="alert alert-warning">
-            Nenhuma venda registrada ainda.
-          </div>
-        )}
+                    {isOpen && (
+                      <tr>
+                        <td colSpan={8} style={{ background: "#fffaf2" }}>
+                          <div id={`sale-print-${sale.id}`} style={{ padding: 18 }}>
+                            <div className="row g-3 mb-3">
+                              <InfoItem
+                                label="ID completo do pedido"
+                                value={`#${sale.id}`}
+                              />
+
+                              <InfoItem
+                                label="ID do usuário"
+                                value={text(sale.userId)}
+                              />
+
+                              <InfoItem
+                                label="Status"
+                                value={statusLabel(sale.status)}
+                              />
+
+                              <InfoItem
+                                label="Criado em"
+                                value={formatDate(sale.createdAt)}
+                              />
+
+                              <InfoItem
+                                label="Atualizado em"
+                                value={formatDate(sale.updatedAt)}
+                              />
+
+                              <InfoItem
+                                label="Tipo de entrega"
+                                value={deliveryTypeLabel(sale.deliveryType)}
+                              />
+
+                              <InfoItem
+                                label="Nome"
+                                value={text(sale.customer?.name)}
+                              />
+
+                              <InfoItem
+                                label="CPF/CNPJ"
+                                value={
+                                  customerDocument
+                                    ? formatCpfCnpj(customerDocument)
+                                    : "Não informado"
+                                }
+                              />
+
+                              <InfoItem
+                                label="E-mail"
+                                value={text(sale.customer?.email)}
+                              />
+
+                              <InfoItem
+                                label="Telefone/WhatsApp"
+                                value={text(sale.customer?.phone)}
+                              />
+
+                              <InfoItem
+                                label="CEP"
+                                value={text(sale.customer?.cep)}
+                              />
+
+                              <InfoItem
+                                label="Rua/Avenida"
+                                value={text(sale.customer?.address)}
+                              />
+
+                              <InfoItem
+                                label="Número"
+                                value={text(sale.customer?.number)}
+                              />
+
+                              <InfoItem
+                                label="Complemento"
+                                value={text(sale.customer?.complement)}
+                              />
+
+                              <InfoItem
+                                label="Bairro"
+                                value={text(sale.customer?.district)}
+                              />
+
+                              <InfoItem
+                                label="Cidade"
+                                value={text(sale.customer?.city)}
+                              />
+
+                              <InfoItem
+                                label="Estado"
+                                value={text(sale.customer?.state)}
+                              />
+
+                              <InfoItem
+                                label="Endereço salvo"
+                                value={
+                                  shippingAddress
+                                    ? `${shippingAddress.address}, ${shippingAddress.number} - ${shippingAddress.city}/${shippingAddress.state}`
+                                    : "Não informado"
+                                }
+                              />
+
+                              <InfoItem
+                                label="Transportadora"
+                                value={text(sale.shippingOption?.company)}
+                              />
+
+                              <InfoItem
+                                label="Serviço"
+                                value={text(sale.shippingOption?.name)}
+                              />
+
+                              <InfoItem
+                                label="Valor do frete"
+                                value={formatMoney(sale.deliveryPrice || 0)}
+                              />
+
+                              <InfoItem
+                                label="ID Melhor Envio"
+                                value={text(sale.melhorEnvioOrderId)}
+                              />
+
+                              <InfoItem
+                                label="Código de rastreio"
+                                value={text(sale.trackingCode)}
+                              />
+                            </div>
+
+                            <div
+                              className="p-3 mb-3"
+                              style={{
+                                background: "#fff",
+                                borderRadius: 18,
+                                border: `1px solid ${theme.border}`,
+                              }}
+                            >
+                              <h6 className="fw-bold mb-3">
+                                Produtos comprados
+                              </h6>
+
+                              <div className="d-grid gap-2">
+                                {sale.items?.map((item) => (
+                                  <div
+                                    key={item.id}
+                                    className="d-flex flex-wrap align-items-center gap-3 p-2"
+                                    style={{
+                                      background: "#fffaf2",
+                                      borderRadius: 16,
+                                      border: `1px solid ${theme.border}`,
+                                    }}
+                                  >
+                                    <img
+                                      src={item.images?.[0] || ""}
+                                      alt={item.name}
+                                      style={{
+                                        width: 70,
+                                        height: 85,
+                                        objectFit: "contain",
+                                        background: "#f3eadf",
+                                        borderRadius: 12,
+                                      }}
+                                    />
+
+                                    <div className="flex-grow-1">
+                                      <strong>{item.name}</strong>
+
+                                      <div
+                                        style={{
+                                          fontSize: 13,
+                                          color: theme.brownSoft,
+                                        }}
+                                      >
+                                        {[item.category, item.size, item.color]
+                                          .filter(Boolean)
+                                          .join(" • ")}
+                                      </div>
+
+                                      <div style={{ fontSize: 13 }}>
+                                        Quantidade: {item.quantity || 1}
+                                      </div>
+
+                                      <div style={{ fontSize: 13 }}>
+                                        Valor unitário:{" "}
+                                        {formatMoney(item.price || 0)}
+                                      </div>
+                                    </div>
+
+                                    <strong>
+                                      {formatMoney(
+                                        Number(item.price || 0) *
+                                          Number(item.quantity || 1),
+                                      )}
+                                    </strong>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div
+                              className="p-3 mb-3"
+                              style={{
+                                background: "#fff",
+                                borderRadius: 18,
+                                border: `1px solid ${theme.border}`,
+                              }}
+                            >
+                              <h6 className="fw-bold mb-3">
+                                Resumo financeiro
+                              </h6>
+
+                              <p className="d-flex justify-content-between mb-1">
+                                <span>Subtotal dos produtos</span>
+                                <strong>{formatMoney(sale.subtotal || 0)}</strong>
+                              </p>
+
+                              <p className="d-flex justify-content-between mb-1">
+                                <span>Frete</span>
+                                <strong>
+                                  {formatMoney(sale.deliveryPrice || 0)}
+                                </strong>
+                              </p>
+
+                              <hr />
+
+                              <h5 className="d-flex justify-content-between mb-0">
+                                <span>Total da venda</span>
+                                <strong>{formatMoney(sale.total || 0)}</strong>
+                              </h5>
+                            </div>
+
+                            <div
+                              className="p-3"
+                              style={{
+                                background: "#fff",
+                                borderRadius: 18,
+                                border: `1px solid ${theme.border}`,
+                              }}
+                            >
+                              <h6 className="fw-bold mb-3">Ações da venda</h6>
+
+                              <label className="form-label">
+                                Código de rastreio
+                              </label>
+
+                              <input
+                                className="form-control mb-3"
+                                value={
+                                  tracking[sale.id] ?? sale.trackingCode ?? ""
+                                }
+                                disabled={isUpdatingThisSale}
+                                onChange={(event) =>
+                                  setTracking((prev) => ({
+                                    ...prev,
+                                    [sale.id]: event.target.value,
+                                  }))
+                                }
+                                placeholder="Ex: BR123456789BR"
+                              />
+
+                              {sale.status !== "pronto_envio" &&
+                                !sale.melhorEnvioOrderId &&
+                                !sale.melhorEnvioPrintUrl && (
+                                  <div className="alert alert-warning py-2">
+                                    Para comprar/gerar etiqueta, altere o status
+                                    para <strong>Pronto para envio</strong>.
+                                  </div>
+                                )}
+
+                              <div className="d-flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  disabled={isUpdatingThisSale}
+                                  style={{
+                                    background: theme.brown,
+                                    color: "#fff",
+                                    borderRadius: 999,
+                                    opacity: isUpdatingThisSale ? 0.7 : 1,
+                                  }}
+                                  onClick={() =>
+                                    changeStatus(sale.id, sale.status)
+                                  }
+                                >
+                                  {isUpdatingThisSale
+                                    ? "Salvando..."
+                                    : "Salvar rastreio"}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-secondary"
+                                  disabled={
+                                    isUpdatingThisSale ||
+                                    generatingLabel[sale.id] ||
+                                    Boolean(sale.melhorEnvioOrderId)
+                                  }
+                                  style={{ borderRadius: 999 }}
+                                  onClick={() => simulateLabel(sale)}
+                                >
+                                  <Tag size={15} className="me-1" />
+                                  {generatingLabel[sale.id]
+                                    ? "Simulando..."
+                                    : "Simular etiqueta"}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  disabled={
+                                    isUpdatingThisSale ||
+                                    generatingLabel[sale.id] ||
+                                    !canBuyLabel
+                                  }
+                                  style={{
+                                    background: canBuyLabel
+                                      ? theme.brownDark
+                                      : "#9ca3af",
+                                    color: "#fff",
+                                    borderRadius: 999,
+                                    opacity:
+                                      isUpdatingThisSale ||
+                                      generatingLabel[sale.id] ||
+                                      !canBuyLabel
+                                        ? 0.7
+                                        : 1,
+                                    cursor: canBuyLabel
+                                      ? "pointer"
+                                      : "not-allowed",
+                                  }}
+                                  onClick={() => openGenerateLabelModal(sale)}
+                                >
+                                  <Tag size={15} className="me-1" />
+                                  {generatingLabel[sale.id]
+                                    ? "Gerando..."
+                                    : "Comprar/Gerar etiqueta"}
+                                </button>
+
+                                {sale.melhorEnvioPrintUrl && (
+                                  <a
+                                    href={sale.melhorEnvioPrintUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="btn btn-sm btn-outline-secondary"
+                                    style={{ borderRadius: 999 }}
+                                  >
+                                    <Printer size={15} className="me-1" />
+                                    Abrir etiqueta
+                                  </a>
+                                )}
+
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-secondary"
+                                  disabled={isUpdatingThisSale}
+                                  style={{ borderRadius: 999 }}
+                                  onClick={() => printSale(sale.id)}
+                                >
+                                  <Printer size={15} className="me-1" />
+                                  Imprimir pedido
+                                </button>
+
+                                {sale.status === "cancelamento_solicitado" && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-danger"
+                                    disabled={isUpdatingThisSale}
+                                    style={{ borderRadius: 999 }}
+                                    onClick={() => approveCancel(sale.id)}
+                                  >
+                                    {isUpdatingThisSale
+                                      ? "Aprovando..."
+                                      : "Aprovar cancelamento"}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+
+              {!filteredSales.length && (
+                <tr>
+                  <td colSpan={8} className="text-center py-4">
+                    Nenhuma venda encontrada com os filtros selecionados.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   );

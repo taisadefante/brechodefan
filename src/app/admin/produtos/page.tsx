@@ -2,9 +2,23 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Eye, EyeOff, Lock, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  Lock,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 
-import { deleteProduct, getAllSales, getProducts } from "@/lib/firestore";
+import {
+  deleteProduct,
+  getAllSales,
+  getProducts,
+  saveProduct,
+} from "@/lib/firestore";
+
 import { useAuth } from "@/contexts/AuthContext";
 import { Product, Sale } from "@/types";
 import { formatMoney } from "@/lib/utils";
@@ -13,6 +27,22 @@ import ProductModal from "@/components/admin/ProductModal";
 
 const ADMIN_EMAIL = "taisadefante@hotmail.com";
 
+const productStatuses: Product["status"][] = [
+  "disponivel",
+  "reservado",
+  "vendido",
+  "arquivado",
+];
+
+function productStatusLabel(status: Product["status"]) {
+  if (status === "disponivel") return "Disponível";
+  if (status === "reservado") return "Reservado";
+  if (status === "vendido") return "Vendido";
+  if (status === "arquivado") return "Arquivado";
+
+  return status;
+}
+
 function AdminProdutosContent() {
   const { user, loading, isAdmin, login } = useAuth();
 
@@ -20,6 +50,9 @@ function AdminProdutosContent() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [modal, setModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [updatingProductId, setUpdatingProductId] = useState<string | null>(
+    null,
+  );
 
   const [email, setEmail] = useState(ADMIN_EMAIL);
   const [password, setPassword] = useState("");
@@ -74,6 +107,43 @@ function AdminProdutosContent() {
     await load();
   }
 
+  async function handleChangeStatus(product: Product, status: Product["status"]) {
+    const previousProducts = products;
+
+    setUpdatingProductId(product.id);
+
+    setProducts((currentProducts) =>
+      currentProducts.map((item) =>
+        item.id === product.id
+          ? {
+              ...item,
+              status,
+              updatedAt: Date.now(),
+              soldAt: status === "vendido" ? Date.now() : item.soldAt || null,
+            }
+          : item,
+      ),
+    );
+
+    try {
+      const productToSave = {
+        ...product,
+        status,
+        updatedAt: Date.now(),
+        soldAt: status === "vendido" ? Date.now() : product.soldAt || null,
+      };
+
+      await saveProduct(productToSave, product.id);
+      await load();
+    } catch (error) {
+      console.error("Erro ao atualizar status do produto:", error);
+      setProducts(previousProducts);
+      alert("Erro ao atualizar status do produto.");
+    } finally {
+      setUpdatingProductId(null);
+    }
+  }
+
   function openNewProduct() {
     setEditingProduct(null);
     setModal(true);
@@ -115,7 +185,7 @@ function AdminProdutosContent() {
   }, [products, sales]);
 
   if (loading) {
-    return <main className="container py-5">Carregando...</main>;
+    return <main className="container-fluid px-3 px-lg-4 py-5">Carregando...</main>;
   }
 
   if (!user || !isAdmin) {
@@ -145,6 +215,7 @@ function AdminProdutosContent() {
             </div>
 
             <h1 className="fw-bold mb-1">Admin Defan Brechó</h1>
+
             <p className="mb-0" style={{ color: theme.brownSoft }}>
               Acesso exclusivo da administração.
             </p>
@@ -211,9 +282,9 @@ function AdminProdutosContent() {
   }
 
   return (
-    <main className="container pb-5">
+    <main className="container-fluid px-3 px-lg-4 pb-5">
       <div
-        className="mb-4 p-4 text-center"
+        className="mb-4 p-4"
         style={{
           background: theme.ivory2,
           borderRadius: 24,
@@ -221,49 +292,14 @@ function AdminProdutosContent() {
           border: `1px solid ${theme.border}`,
         }}
       >
-        <h1 className="fw-bold mb-1">Produtos</h1>
-        <p className="mb-0" style={{ color: theme.brownSoft }}>
-          Cadastre, edite e controle o estoque dos produtos.
-        </p>
-      </div>
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
+          <div>
+            <h1 className="fw-bold mb-1">Produtos</h1>
 
-      <div className="row g-3 mb-4">
-        {[
-          ["Disponíveis", stats.active],
-          ["Reservados", stats.reserved],
-          ["Vendidos", stats.sold],
-          ["Arquivados", stats.archived],
-          ["Estoque total", stats.totalStock],
-          ["Faturamento mensal", formatMoney(stats.revenue)],
-        ].map(([label, value]) => (
-          <div className="col-md-4" key={String(label)}>
-            <div
-              className="p-4 h-100"
-              style={{
-                background: theme.ivory2,
-                borderRadius: 24,
-                boxShadow: theme.shadow,
-                border: `1px solid ${theme.border}`,
-              }}
-            >
-              <small style={{ color: theme.brownSoft }}>{label}</small>
-              <h3 className="fw-bold mb-0">{value}</h3>
-            </div>
+            <p className="mb-0" style={{ color: theme.brownSoft }}>
+              Cadastre, edite e altere o status direto na lista.
+            </p>
           </div>
-        ))}
-      </div>
-
-      <div
-        className="p-3"
-        style={{
-          background: theme.ivory2,
-          borderRadius: 24,
-          boxShadow: theme.shadow,
-          border: `1px solid ${theme.border}`,
-        }}
-      >
-        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-          <h4 className="fw-bold mb-0">Lista de produtos</h4>
 
           <div className="d-flex flex-wrap gap-2">
             <button
@@ -274,6 +310,7 @@ function AdminProdutosContent() {
                 background: theme.brown,
                 color: "#fff",
                 borderRadius: 999,
+                padding: "9px 16px",
               }}
             >
               <Plus size={15} className="me-1" />
@@ -288,15 +325,61 @@ function AdminProdutosContent() {
                 background: theme.brownDark,
                 color: "#fff",
                 borderRadius: 999,
+                padding: "9px 16px",
               }}
             >
+              <RefreshCw size={15} className="me-1" />
               Atualizar
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="row g-3 mb-4">
+        {[
+          ["Disponíveis", stats.active],
+          ["Reservados", stats.reserved],
+          ["Vendidos", stats.sold],
+          ["Arquivados", stats.archived],
+          ["Estoque total", stats.totalStock],
+          ["Faturamento mensal", formatMoney(stats.revenue)],
+        ].map(([label, value]) => (
+          <div className="col-6 col-xl-2" key={String(label)}>
+            <div
+              className="p-3 h-100"
+              style={{
+                background: theme.ivory2,
+                borderRadius: 20,
+                boxShadow: theme.shadow,
+                border: `1px solid ${theme.border}`,
+              }}
+            >
+              <small style={{ color: theme.brownSoft }}>{label}</small>
+              <h4 className="fw-bold mb-0">{value}</h4>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <section
+        style={{
+          background: theme.ivory2,
+          borderRadius: 24,
+          boxShadow: theme.shadow,
+          border: `1px solid ${theme.border}`,
+          overflow: "hidden",
+        }}
+      >
+        <div className="p-3 border-bottom">
+          <h4 className="fw-bold mb-1">Lista de produtos</h4>
+
+          <p className="mb-0" style={{ color: theme.brownSoft }}>
+            Altere o status na própria linha sem abrir o cadastro.
+          </p>
+        </div>
 
         <div className="table-responsive">
-          <table className="table align-middle">
+          <table className="table align-middle mb-0">
             <thead>
               <tr>
                 <th>Produto</th>
@@ -305,83 +388,146 @@ function AdminProdutosContent() {
                 <th>Preço</th>
                 <th>Estoque</th>
                 <th>Status</th>
-                <th style={{ width: 150 }}>Ações</th>
+                <th style={{ width: 110, textAlign: "center" }}>Ações</th>
               </tr>
             </thead>
 
             <tbody>
-              {products.map((product) => (
-                <tr key={product.id}>
-                  <td>
-                    <div className="d-flex align-items-center gap-2">
-                      {product.images?.[0] ? (
-                        <img
-                          src={product.images[0]}
-                          alt={product.name}
-                          style={{
-                            width: 54,
-                            height: 54,
-                            objectFit: "cover",
-                            borderRadius: 12,
-                          }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: 54,
-                            height: 54,
-                            borderRadius: 12,
-                            background: "#eadfce",
-                          }}
-                        />
-                      )}
+              {products.map((product) => {
+                const isUpdating = updatingProductId === product.id;
 
-                      <div>
-                        <strong>{product.name}</strong>
+                return (
+                  <tr key={product.id}>
+                    <td style={{ minWidth: 260 }}>
+                      <div className="d-flex align-items-center gap-2">
+                        {product.images?.[0] ? (
+                          <img
+                            src={product.images[0]}
+                            alt={product.name}
+                            style={{
+                              width: 58,
+                              height: 58,
+                              objectFit: "cover",
+                              borderRadius: 14,
+                              background: "#f3eadf",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: 58,
+                              height: 58,
+                              borderRadius: 14,
+                              background: "#eadfce",
+                            }}
+                          />
+                        )}
 
-                        {product.brand && (
+                        <div>
+                          <strong>{product.name}</strong>
+
+                          {product.brand && (
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color: theme.brownSoft,
+                              }}
+                            >
+                              {product.brand}
+                            </div>
+                          )}
+
                           <div
                             style={{
                               fontSize: 12,
                               color: theme.brownSoft,
                             }}
                           >
-                            {product.brand}
+                            ID: {product.id.slice(0, 8)}
                           </div>
-                        )}
+                        </div>
                       </div>
-                    </div>
-                  </td>
+                    </td>
 
-                  <td>{product.category}</td>
-                  <td>{product.size}</td>
-                  <td>{formatMoney(product.price)}</td>
-                  <td>
-                    <strong>{Number(product.stock || 0)}</strong>
-                  </td>
-                  <td>{product.status}</td>
+                    <td>{product.category || "Não informado"}</td>
+                    <td>{product.size || "Não informado"}</td>
 
-                  <td>
-                    <div className="d-flex gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary"
-                        onClick={() => openEditProduct(product)}
+                    <td>
+                      <strong>{formatMoney(product.price)}</strong>
+                    </td>
+
+                    <td>
+                      <strong>{Number(product.stock || 0)}</strong>
+                    </td>
+
+                    <td style={{ minWidth: 190 }}>
+                      <select
+                        className="form-select form-select-sm"
+                        value={product.status}
+                        disabled={isUpdating}
+                        onChange={(event) =>
+                          handleChangeStatus(
+                            product,
+                            event.target.value as Product["status"],
+                          )
+                        }
+                        style={{
+                          borderRadius: 999,
+                          border: `1px solid ${theme.border}`,
+                          fontWeight: 700,
+                          color: theme.brownDark,
+                        }}
                       >
-                        <Pencil size={15} />
-                      </button>
+                        {productStatuses.map((status) => (
+                          <option key={status} value={status}>
+                            {productStatusLabel(status)}
+                          </option>
+                        ))}
+                      </select>
 
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-danger"
-                        onClick={() => handleDeleteProduct(product)}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      {isUpdating && (
+                        <small style={{ color: theme.brownSoft }}>
+                          Salvando...
+                        </small>
+                      )}
+                    </td>
+
+                    <td>
+                      <div className="d-flex justify-content-center gap-2">
+                        <button
+                          type="button"
+                          title="Editar produto"
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => openEditProduct(product)}
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: "50%",
+                            padding: 0,
+                          }}
+                        >
+                          <Pencil size={15} />
+                        </button>
+
+                        <button
+                          type="button"
+                          title="Excluir produto"
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => handleDeleteProduct(product)}
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: "50%",
+                            padding: 0,
+                          }}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
 
               {!products.length && (
                 <tr>
@@ -393,7 +539,7 @@ function AdminProdutosContent() {
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
 
       {modal && (
         <ProductModal
