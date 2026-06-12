@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, LogOut, Package, ShoppingBag } from "lucide-react";
 
-import { useAuth } from "@/contexts/AuthContext";
+import { useAdminAuth } from "@/contexts/AdminAuthContext";
 import { theme } from "@/lib/theme";
 
 export default function AdminLayout({
@@ -13,9 +13,9 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { user, isAdmin, logout } = useAuth();
+  const { adminUser, loadingAdmin, isAdmin, adminLogout } = useAdminAuth();
 
-  const showMenu = Boolean(user && isAdmin);
+  const showMenu = Boolean(adminUser && isAdmin);
 
   function menuButtonStyle(active: boolean): React.CSSProperties {
     return {
@@ -25,6 +25,10 @@ export default function AdminLayout({
       border: active ? "none" : "1px solid #6c757d",
       fontWeight: 600,
     };
+  }
+
+  if (loadingAdmin) {
+    return <main className="container py-5">Carregando...</main>;
   }
 
   return (
@@ -78,12 +82,12 @@ export default function AdminLayout({
 
               <button
                 type="button"
-                onClick={logout}
+                onClick={adminLogout}
                 className="btn btn-outline-danger"
                 style={{ borderRadius: 999 }}
               >
                 <LogOut size={16} className="me-1" />
-                Sair
+                Sair do admin
               </button>
             </div>
           </div>

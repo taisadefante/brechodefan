@@ -1,17 +1,19 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import { ChevronDown, ChevronUp, Printer, Tag } from "lucide-react";
+
 import {
   approveCancelSale,
   getAllSales,
   updateSaleShippingLabel,
   updateSaleStatus,
 } from "@/lib/firestore";
-import { useAuth } from "@/contexts/AuthContext";
+
+import { useAdminAuth } from "@/contexts/AdminAuthContext";
 import { CustomerData, Sale, SaleStatus } from "@/types";
 import { formatMoney, statusLabel } from "@/lib/utils";
 import { theme } from "@/lib/theme";
-import { ChevronDown, ChevronUp, Printer, Tag } from "lucide-react";
 
 type CustomerWithDocument = CustomerData & {
   document?: string;
@@ -46,6 +48,66 @@ function onlyNumbers(value?: string) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function isValidCpf(value?: string) {
+  const cpf = onlyNumbers(value);
+
+  if (cpf.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(cpf)) return false;
+
+  let sum = 0;
+
+  for (let i = 0; i < 9; i++) {
+    sum += Number(cpf[i]) * (10 - i);
+  }
+
+  let digit = 11 - (sum % 11);
+  if (digit >= 10) digit = 0;
+
+  if (digit !== Number(cpf[9])) return false;
+
+  sum = 0;
+
+  for (let i = 0; i < 10; i++) {
+    sum += Number(cpf[i]) * (11 - i);
+  }
+
+  digit = 11 - (sum % 11);
+  if (digit >= 10) digit = 0;
+
+  return digit === Number(cpf[10]);
+}
+
+function isValidCnpj(value?: string) {
+  const cnpj = onlyNumbers(value);
+
+  if (cnpj.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(cnpj)) return false;
+
+  const calcDigit = (base: string, factors: number[]) => {
+    const sum = factors.reduce(
+      (acc, factor, index) => acc + Number(base[index]) * factor,
+      0,
+    );
+
+    const rest = sum % 11;
+    return rest < 2 ? 0 : 11 - rest;
+  };
+
+  const digit1 = calcDigit(cnpj, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  const digit2 = calcDigit(cnpj, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+
+  return digit1 === Number(cnpj[12]) && digit2 === Number(cnpj[13]);
+}
+
+function isValidCpfOrCnpj(value?: string) {
+  const clean = onlyNumbers(value);
+
+  if (clean.length === 11) return isValidCpf(clean);
+  if (clean.length === 14) return isValidCnpj(clean);
+
+  return false;
+}
+
 function formatCpfCnpj(value?: string) {
   const clean = onlyNumbers(value);
 
@@ -73,10 +135,11 @@ function getCustomerDocument(customer?: CustomerWithDocument | null) {
   );
 }
 
-function deliveryTypeLabel(type: string) {
+function deliveryTypeLabel(type?: string) {
   if (type === "envio") return "Envio pelos Correios/transportadora";
   if (type === "retirada") return "Retirada em Realengo/RJ";
   if (type === "combinar_whatsapp") return "Uber/99 Entrega via WhatsApp";
+
   return type || "Não informado";
 }
 
@@ -115,7 +178,7 @@ function InfoItem({
 }
 
 function AdminVendasContent() {
-  const { user, loading, isAdmin } = useAuth();
+  const { adminUser, loadingAdmin, isAdmin } = useAdminAuth();
 
   const [sales, setSales] = useState<SaleWithDocument[]>([]);
   const [tracking, setTracking] = useState<Record<string, string>>({});
@@ -135,10 +198,10 @@ function AdminVendasContent() {
   }
 
   useEffect(() => {
-    if (user && isAdmin) {
+    if (adminUser && isAdmin) {
       load();
     }
-  }, [user, isAdmin]);
+  }, [adminUser, isAdmin]);
 
   async function changeStatus(id: string, status: SaleStatus) {
     await updateSaleStatus(id, status, tracking[id]);
@@ -194,13 +257,15 @@ function AdminVendasContent() {
 
     if (!document) {
       alert(
-        "CPF/CNPJ não encontrado nesta venda. Para vendas antigas, adicione customer.document no Firestore ou crie uma nova venda.",
+        "CPF/CNPJ não encontrado nesta venda. Adicione o CPF/CNPJ do cliente nos dados da venda ou crie uma nova venda com documento válido.",
       );
       return null;
     }
 
-    if (document.length !== 11 && document.length !== 14) {
-      alert("CPF/CNPJ do cliente inválido. Use somente números.");
+    if (!isValidCpfOrCnpj(document)) {
+      alert(
+        "CPF/CNPJ inválido. O Melhor Envio exige CPF/CNPJ real e válido para simular ou gerar etiqueta.",
+      );
       return null;
     }
 
@@ -351,12 +416,14 @@ function AdminVendasContent() {
               padding: 24px;
               color: #3b2418;
             }
+
             .product {
               display: flex;
               gap: 12px;
               border-bottom: 1px solid #eee;
               padding: 10px 0;
             }
+
             .product img {
               width: 70px;
               height: 85px;
@@ -364,9 +431,13 @@ function AdminVendasContent() {
               background: #f3eadf;
               border-radius: 8px;
             }
-            small { color: #7a5c4c; }
+
+            small {
+              color: #7a5c4c;
+            }
           </style>
         </head>
+
         <body>
           ${content.innerHTML}
           <script>window.print();</script>
@@ -377,11 +448,11 @@ function AdminVendasContent() {
     printWindow.document.close();
   }
 
-  if (loading) {
+  if (loadingAdmin) {
     return <main className="container pb-5">Carregando...</main>;
   }
 
-  if (!user || !isAdmin) {
+  if (!adminUser || !isAdmin) {
     return (
       <main className="container pb-5">
         <div className="alert alert-danger">
@@ -403,6 +474,7 @@ function AdminVendasContent() {
         }}
       >
         <h1 className="fw-bold mb-1">Vendas</h1>
+
         <p className="mb-0" style={{ color: theme.brownSoft }}>
           Gerencie pedidos, pagamentos, frete e etiquetas.
         </p>
@@ -484,11 +556,7 @@ function AdminVendasContent() {
 
                     <strong>{formatMoney(sale.total || 0)}</strong>
 
-                    {isOpen ? (
-                      <ChevronUp size={20} />
-                    ) : (
-                      <ChevronDown size={20} />
-                    )}
+                    {isOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                   </div>
                 </div>
               </button>
@@ -507,11 +575,14 @@ function AdminVendasContent() {
                     <InfoItem label="Status" value={statusLabel(sale.status)} />
                     <InfoItem label="Criado em" value={formatDate(sale.createdAt)} />
                     <InfoItem label="Atualizado em" value={formatDate(sale.updatedAt)} />
+
                     <InfoItem
                       label="Tipo de entrega"
                       value={deliveryTypeLabel(sale.deliveryType)}
                     />
+
                     <InfoItem label="Nome" value={text(sale.customer?.name)} />
+
                     <InfoItem
                       label="CPF/CNPJ"
                       value={
@@ -520,24 +591,32 @@ function AdminVendasContent() {
                           : "Não informado"
                       }
                     />
+
                     <InfoItem label="E-mail" value={text(sale.customer?.email)} />
+
                     <InfoItem
                       label="Telefone/WhatsApp"
                       value={text(sale.customer?.phone)}
                     />
+
                     <InfoItem label="CEP" value={text(sale.customer?.cep)} />
+
                     <InfoItem
                       label="Rua/Avenida"
                       value={text(sale.customer?.address)}
                     />
+
                     <InfoItem label="Número" value={text(sale.customer?.number)} />
+
                     <InfoItem
                       label="Complemento"
                       value={text(sale.customer?.complement)}
                     />
+
                     <InfoItem label="Bairro" value={text(sale.customer?.district)} />
                     <InfoItem label="Cidade" value={text(sale.customer?.city)} />
                     <InfoItem label="Estado" value={text(sale.customer?.state)} />
+
                     <InfoItem
                       label="Endereço salvo"
                       value={
@@ -546,19 +625,27 @@ function AdminVendasContent() {
                           : "Não informado"
                       }
                     />
+
                     <InfoItem
                       label="Transportadora"
                       value={text(sale.shippingOption?.company)}
                     />
-                    <InfoItem label="Serviço" value={text(sale.shippingOption?.name)} />
+
+                    <InfoItem
+                      label="Serviço"
+                      value={text(sale.shippingOption?.name)}
+                    />
+
                     <InfoItem
                       label="Valor do frete"
                       value={formatMoney(sale.deliveryPrice || 0)}
                     />
+
                     <InfoItem
                       label="ID Melhor Envio"
                       value={text(sale.melhorEnvioOrderId)}
                     />
+
                     <InfoItem
                       label="Código de rastreio"
                       value={text(sale.trackingCode)}
@@ -600,15 +687,24 @@ function AdminVendasContent() {
 
                           <div className="flex-grow-1">
                             <strong>{item.name}</strong>
-                            <div style={{ fontSize: 13, color: theme.brownSoft }}>
+
+                            <div
+                              style={{
+                                fontSize: 13,
+                                color: theme.brownSoft,
+                              }}
+                            >
                               {[item.category, item.size, item.color]
                                 .filter(Boolean)
                                 .join(" • ")}
                             </div>
+
                             <div style={{ fontSize: 13 }}>ID: {item.id}</div>
+
                             <div style={{ fontSize: 13 }}>
                               Quantidade: {item.quantity || 1}
                             </div>
+
                             <div style={{ fontSize: 13 }}>
                               Valor unitário: {formatMoney(item.price || 0)}
                             </div>

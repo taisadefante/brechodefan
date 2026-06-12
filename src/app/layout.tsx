@@ -4,6 +4,7 @@ import { Suspense } from "react";
 
 import { AuthProvider } from "@/contexts/AuthContext";
 import { CartProvider } from "@/contexts/CartContext";
+import { AdminAuthProvider } from "@/contexts/AdminAuthContext";
 
 import Navbar from "@/components/Navbar";
 import WhatsAppButton from "@/components/WhatsAppButton";
@@ -33,17 +34,19 @@ export default function RootLayout({
         }}
       >
         <AuthProvider>
-          <CartProvider>
-            <Suspense fallback={null}>
-              <Navbar />
-            </Suspense>
+          <AdminAuthProvider>
+            <CartProvider>
+              <Suspense fallback={null}>
+                <Navbar />
+              </Suspense>
 
-            <main style={{ flex: 1 }}>{children}</main>
+              <main style={{ flex: 1 }}>{children}</main>
 
-            <Footer />
+              <Footer />
 
-            <WhatsAppButton />
-          </CartProvider>
+              <WhatsAppButton />
+            </CartProvider>
+          </AdminAuthProvider>
         </AuthProvider>
       </body>
     </html>

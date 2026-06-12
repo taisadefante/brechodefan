@@ -25,15 +25,27 @@ type MelhorEnvioCustomer = {
 };
 
 type MelhorEnvioShippingOption = {
-  id: string;
+  id: string | number;
   name?: string;
   company?: string;
   price?: number;
   deliveryTime?: number | string | null;
 };
 
-function onlyNumbers(value: string) {
+type MelhorEnvioRequestBody = {
+  action?: "simulate" | "generate";
+  saleId?: string;
+  customer?: MelhorEnvioCustomer;
+  items?: MelhorEnvioItem[];
+  shippingOption?: MelhorEnvioShippingOption;
+};
+
+function onlyNumbers(value?: string | number | null) {
   return String(value || "").replace(/\D/g, "");
+}
+
+function normalizeState(value?: string) {
+  return String(value || "").trim().toUpperCase();
 }
 
 function getBaseUrl() {
@@ -56,20 +68,23 @@ function getPackage(items: MelhorEnvioItem[]) {
 }
 
 function getWeight(items: MelhorEnvioItem[]) {
-  const total = items.reduce(
-    (sum, item) =>
-      sum + Number(item.weight || 0.15) * Number(item.quantity || 1),
-    0,
-  );
+  const total = items.reduce((sum, item) => {
+    const weight = Number(item.weight || 0.15);
+    const quantity = Number(item.quantity || 1);
+
+    return sum + weight * quantity;
+  }, 0);
 
   return Math.max(total, 0.15);
 }
 
 function getInsuranceValue(items: MelhorEnvioItem[]) {
-  const total = items.reduce(
-    (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1),
-    0,
-  );
+  const total = items.reduce((sum, item) => {
+    const price = Number(item.price || 0);
+    const quantity = Number(item.quantity || 1);
+
+    return sum + price * quantity;
+  }, 0);
 
   return Math.max(total, 1);
 }
@@ -80,13 +95,27 @@ async function readJsonResponse(response: Response) {
   try {
     return rawText ? JSON.parse(rawText) : {};
   } catch {
-    return { raw: rawText };
+    return {
+      raw: rawText || "Resposta vazia ou inválida.",
+    };
   }
+}
+
+function errorResponse(message: string, status = 400, details?: unknown) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: message,
+      details: details || null,
+    },
+    { status },
+  );
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const body = (await request.json()) as MelhorEnvioRequestBody;
+
     const action = body.action === "generate" ? "generate" : "simulate";
 
     const token = process.env.MELHOR_ENVIO_TOKEN;
@@ -102,113 +131,98 @@ export async function POST(request: NextRequest) {
     const fromEmail =
       process.env.MELHOR_ENVIO_FROM_EMAIL || "taisadefante@hotmail.com";
 
-    const fromDocument = onlyNumbers(
-      process.env.MELHOR_ENVIO_FROM_DOCUMENT || "",
-    );
+    const fromDocument = onlyNumbers(process.env.MELHOR_ENVIO_FROM_DOCUMENT);
 
     const fromAddress = process.env.MELHOR_ENVIO_FROM_ADDRESS || "";
     const fromNumber = process.env.MELHOR_ENVIO_FROM_NUMBER || "";
+    const fromComplement = process.env.MELHOR_ENVIO_FROM_COMPLEMENT || "";
     const fromDistrict = process.env.MELHOR_ENVIO_FROM_DISTRICT || "";
     const fromCity = process.env.MELHOR_ENVIO_FROM_CITY || "Rio de Janeiro";
-    const fromState = process.env.MELHOR_ENVIO_FROM_STATE || "RJ";
+    const fromState = normalizeState(
+      process.env.MELHOR_ENVIO_FROM_STATE || "RJ",
+    );
 
     if (!token) {
-      return NextResponse.json(
-        { error: "MELHOR_ENVIO_TOKEN não configurado." },
-        { status: 500 },
-      );
+      return errorResponse("MELHOR_ENVIO_TOKEN não configurado.", 500);
     }
 
     if (!fromDocument) {
-      return NextResponse.json(
-        {
-          error:
-            "MELHOR_ENVIO_FROM_DOCUMENT não configurado. Informe CPF ou CNPJ do remetente somente com números.",
-        },
-        { status: 500 },
+      return errorResponse(
+        "MELHOR_ENVIO_FROM_DOCUMENT não configurado. Informe CPF ou CNPJ do remetente somente com números.",
+        500,
       );
     }
 
-    const items = Array.isArray(body.items)
-      ? (body.items as MelhorEnvioItem[])
-      : [];
+    if (fromDocument.length !== 11 && fromDocument.length !== 14) {
+      return errorResponse(
+        "MELHOR_ENVIO_FROM_DOCUMENT inválido. Use CPF com 11 números ou CNPJ com 14 números.",
+        500,
+      );
+    }
 
-    const customer = body.customer as MelhorEnvioCustomer;
-    const shippingOption = body.shippingOption as MelhorEnvioShippingOption;
+    if (!fromAddress || !fromNumber || !fromDistrict || !fromCity || !fromState) {
+      return errorResponse(
+        "Dados de remetente incompletos. Configure endereço, número, bairro, cidade e estado do remetente.",
+        500,
+      );
+    }
 
-    const toDocument = onlyNumbers(
-      customer?.document || customer?.cpf || customer?.cnpj || "",
-    );
+    if (fromPostalCode.length !== 8) {
+      return errorResponse(
+        "MELHOR_ENVIO_FROM_POSTAL_CODE inválido. Informe um CEP com 8 números.",
+        500,
+      );
+    }
+
+    const items = Array.isArray(body.items) ? body.items : [];
+    const customer = body.customer;
+    const shippingOption = body.shippingOption;
 
     if (!items.length) {
-      return NextResponse.json(
-        { error: "Venda sem produtos." },
-        { status: 400 },
-      );
+      return errorResponse("Venda sem produtos.", 400);
     }
 
     if (!shippingOption?.id) {
-      return NextResponse.json(
-        { error: "Venda sem frete escolhido salvo." },
-        { status: 400 },
-      );
+      return errorResponse("Venda sem frete escolhido salvo.", 400);
     }
 
+    if (!customer) {
+      return errorResponse("Dados do cliente não enviados.", 400);
+    }
+
+    const toDocument = onlyNumbers(
+      customer.document || customer.cpf || customer.cnpj,
+    );
+
     if (!toDocument) {
-      return NextResponse.json(
-        {
-          error:
-            "CPF ou CNPJ do destinatário não informado. Cadastre o documento do cliente antes de simular ou gerar etiqueta.",
-        },
-        { status: 400 },
+      return errorResponse(
+        "CPF ou CNPJ do destinatário não informado. Cadastre o documento do cliente antes de simular ou gerar etiqueta.",
+        400,
       );
     }
 
     if (toDocument.length !== 11 && toDocument.length !== 14) {
-      return NextResponse.json(
-        {
-          error: "CPF ou CNPJ do destinatário inválido.",
-        },
-        { status: 400 },
-      );
+      return errorResponse("CPF ou CNPJ do destinatário inválido.", 400);
     }
 
-    const toPostalCode = onlyNumbers(customer?.cep || "");
+    const toPostalCode = onlyNumbers(customer.cep);
+    const toState = normalizeState(customer.state);
 
     if (toPostalCode.length !== 8) {
-      return NextResponse.json(
-        { error: "CEP do cliente inválido ou não informado." },
-        { status: 400 },
+      return errorResponse("CEP do cliente inválido ou não informado.", 400);
+    }
+
+    if (!customer.name || !customer.address || !customer.number) {
+      return errorResponse(
+        "Dados do cliente incompletos. Informe nome, endereço e número antes de gerar etiqueta.",
+        400,
       );
     }
 
-    if (!customer?.name || !customer?.address || !customer?.number) {
-      return NextResponse.json(
-        {
-          error:
-            "Dados do cliente incompletos. Informe nome, endereço e número antes de gerar etiqueta.",
-        },
-        { status: 400 },
-      );
-    }
-
-    if (!customer?.district || !customer?.city || !customer?.state) {
-      return NextResponse.json(
-        {
-          error:
-            "Dados do cliente incompletos. Informe bairro, cidade e estado.",
-        },
-        { status: 400 },
-      );
-    }
-
-    if (!fromAddress || !fromNumber || !fromDistrict) {
-      return NextResponse.json(
-        {
-          error:
-            "Dados de remetente incompletos. Configure endereço, número e bairro do remetente.",
-        },
-        { status: 500 },
+    if (!customer.district || !customer.city || !toState) {
+      return errorResponse(
+        "Dados do cliente incompletos. Informe bairro, cidade e estado.",
+        400,
       );
     }
 
@@ -235,7 +249,7 @@ export async function POST(request: NextRequest) {
         company_document: fromDocument.length === 14 ? fromDocument : "",
         state_register: "",
         address: fromAddress,
-        complement: "",
+        complement: fromComplement,
         number: fromNumber,
         district: fromDistrict,
         city: fromCity,
@@ -259,10 +273,10 @@ export async function POST(request: NextRequest) {
         country_id: "BR",
         postal_code: toPostalCode,
         note: "",
-        state_abbr: customer.state,
+        state_abbr: toState,
       },
       products: items.map((item) => ({
-        name: item.name,
+        name: item.name || "Produto",
         quantity: Number(item.quantity || 1),
         unitary_value: Number(item.price || 0),
       })),
@@ -275,7 +289,7 @@ export async function POST(request: NextRequest) {
         },
       ],
       options: {
-        insurance_value: insuranceValue,
+        insurance_value: Number(insuranceValue.toFixed(2)),
         receipt: false,
         own_hand: false,
         reverse: false,
@@ -302,25 +316,20 @@ export async function POST(request: NextRequest) {
     const cartData = await readJsonResponse(cartResponse);
 
     if (!cartResponse.ok) {
-      return NextResponse.json(
-        {
-          error: "Erro ao adicionar etiqueta no carrinho do Melhor Envio.",
-          details: cartData,
-          sentPayload: cartPayload,
-        },
-        { status: cartResponse.status },
+      return errorResponse(
+        "Erro ao adicionar etiqueta no carrinho do Melhor Envio.",
+        cartResponse.status,
+        cartData,
       );
     }
 
     const orderId = cartData?.id || cartData?.order?.id;
 
     if (!orderId) {
-      return NextResponse.json(
-        {
-          error: "Melhor Envio não retornou ID do pedido da etiqueta.",
-          details: cartData,
-        },
-        { status: 500 },
+      return errorResponse(
+        "Melhor Envio não retornou ID do pedido da etiqueta.",
+        500,
+        cartData,
       );
     }
 
@@ -349,14 +358,13 @@ export async function POST(request: NextRequest) {
     const checkoutData = await readJsonResponse(checkoutResponse);
 
     if (!checkoutResponse.ok) {
-      return NextResponse.json(
+      return errorResponse(
+        "Etiqueta criada no carrinho, mas não foi possível comprar a etiqueta. Verifique saldo/permissões no Melhor Envio.",
+        checkoutResponse.status,
         {
-          error:
-            "Etiqueta criada no carrinho, mas não foi possível comprar a etiqueta. Verifique saldo/permissões no Melhor Envio.",
           orderId,
-          details: checkoutData,
+          checkoutData,
         },
-        { status: checkoutResponse.status },
       );
     }
 
@@ -374,14 +382,13 @@ export async function POST(request: NextRequest) {
     const generateData = await readJsonResponse(generateResponse);
 
     if (!generateResponse.ok) {
-      return NextResponse.json(
+      return errorResponse(
+        "Etiqueta comprada, mas ainda não foi possível gerar. Tente imprimir novamente em alguns segundos.",
+        generateResponse.status,
         {
-          error:
-            "Etiqueta comprada, mas ainda não foi possível gerar. Tente imprimir novamente em alguns segundos.",
           orderId,
-          details: generateData,
+          generateData,
         },
-        { status: generateResponse.status },
       );
     }
 
@@ -399,14 +406,13 @@ export async function POST(request: NextRequest) {
     const printData = await readJsonResponse(printResponse);
 
     if (!printResponse.ok) {
-      return NextResponse.json(
+      return errorResponse(
+        "Etiqueta gerada, mas não foi possível obter o link de impressão agora.",
+        printResponse.status,
         {
-          error:
-            "Etiqueta gerada, mas não foi possível obter o link de impressão agora.",
           orderId,
-          details: printData,
+          printData,
         },
-        { status: printResponse.status },
       );
     }
 
@@ -428,12 +434,19 @@ export async function POST(request: NextRequest) {
       print: printData,
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error: "Erro interno ao gerar etiqueta.",
-        details: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 },
+    console.error("Erro interno Melhor Envio:", error);
+
+    return errorResponse(
+      "Erro interno ao gerar etiqueta.",
+      500,
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack:
+              process.env.NODE_ENV === "development" ? error.stack : undefined,
+          }
+        : String(error),
     );
   }
 }

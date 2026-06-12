@@ -7,11 +7,14 @@ import {
   getDocs,
   orderBy,
   query,
+  runTransaction,
   setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
+
 import { db } from "./firebase";
+
 import {
   CartItem,
   CustomerAddress,
@@ -30,13 +33,14 @@ type SaleWithInventory = Sale & {
 };
 
 function saleUsesStock(status: SaleStatus) {
-  return (
-    status === "pago" ||
-    status === "separando" ||
-    status === "pronto_retirada" ||
-    status === "enviado" ||
-    status === "entregue"
-  );
+  return [
+    "aguardando_pagamento",
+    "pago",
+    "separando",
+    "pronto_retirada",
+    "enviado",
+    "entregue",
+  ].includes(status);
 }
 
 function getItemQuantity(item: CartItem) {
@@ -46,26 +50,30 @@ function getItemQuantity(item: CartItem) {
 async function reserveStockFromSale(sale: SaleWithInventory) {
   if (sale.inventoryProcessed) return;
 
-  await Promise.all(
-    sale.items.map(async (item) => {
-      const productRef = doc(db, "products", item.id);
-      const productSnap = await getDoc(productRef);
+  await runTransaction(db, async (transaction) => {
+    const productRefs = sale.items.map((item) => doc(db, "products", item.id));
+    const productSnaps = await Promise.all(
+      productRefs.map((ref) => transaction.get(ref)),
+    );
+
+    productSnaps.forEach((productSnap, index) => {
       if (!productSnap.exists()) return;
 
-      const product = { id: productSnap.id, ...productSnap.data() } as Product;
+      const item = sale.items[index];
+      const product = productSnap.data() as Product;
       const quantity = getItemQuantity(item);
       const currentStock = Math.max(Number(product.stock || 0), 0);
       const newStock = Math.max(currentStock - quantity, 0);
 
-      await updateDoc(productRef, {
+      transaction.update(productRefs[index], {
         stock: newStock,
         status: newStock > 0 ? "disponivel" : "reservado",
         soldAt: null,
         reservedUntil: null,
         updatedAt: Date.now(),
       });
-    }),
-  );
+    });
+  });
 }
 
 async function confirmStockFromSale(sale: SaleWithInventory) {
@@ -73,9 +81,10 @@ async function confirmStockFromSale(sale: SaleWithInventory) {
     sale.items.map(async (item) => {
       const productRef = doc(db, "products", item.id);
       const productSnap = await getDoc(productRef);
+
       if (!productSnap.exists()) return;
 
-      const product = { id: productSnap.id, ...productSnap.data() } as Product;
+      const product = productSnap.data() as Product;
       const currentStock = Math.max(Number(product.stock || 0), 0);
 
       await updateDoc(productRef, {
@@ -91,26 +100,46 @@ async function confirmStockFromSale(sale: SaleWithInventory) {
 async function restoreStockFromSale(sale: SaleWithInventory) {
   if (sale.inventoryRestored) return;
 
-  await Promise.all(
-    sale.items.map(async (item) => {
-      const productRef = doc(db, "products", item.id);
-      const productSnap = await getDoc(productRef);
+  await runTransaction(db, async (transaction) => {
+    const saleRef = doc(db, "sales", sale.id);
+    const saleSnap = await transaction.get(saleRef);
+
+    if (!saleSnap.exists()) return;
+
+    const currentSale = saleSnap.data() as SaleWithInventory;
+
+    if (currentSale.inventoryRestored) return;
+
+    const items = currentSale.items || sale.items || [];
+    const productRefs = items.map((item) => doc(db, "products", item.id));
+    const productSnaps = await Promise.all(
+      productRefs.map((ref) => transaction.get(ref)),
+    );
+
+    productSnaps.forEach((productSnap, index) => {
       if (!productSnap.exists()) return;
 
-      const product = { id: productSnap.id, ...productSnap.data() } as Product;
+      const item = items[index];
+      const product = productSnap.data() as Product;
       const quantity = getItemQuantity(item);
       const currentStock = Math.max(Number(product.stock || 0), 0);
       const newStock = currentStock + quantity;
 
-      await updateDoc(productRef, {
+      transaction.update(productRefs[index], {
         stock: newStock,
         status: "disponivel",
         soldAt: null,
         reservedUntil: null,
         updatedAt: Date.now(),
       });
-    }),
-  );
+    });
+
+    transaction.update(saleRef, {
+      inventoryProcessed: false,
+      inventoryRestored: true,
+      updatedAt: Date.now(),
+    });
+  });
 }
 
 export async function getProducts(includeSold = false): Promise<Product[]> {
@@ -127,7 +156,9 @@ export async function getProducts(includeSold = false): Promise<Product[]> {
 
 export async function getProduct(id: string): Promise<Product | null> {
   const snap = await getDoc(doc(db, "products", id));
+
   if (!snap.exists()) return null;
+
   return { id: snap.id, ...snap.data() } as Product;
 }
 
@@ -188,9 +219,10 @@ export async function releaseProduct(productId: string): Promise<void> {
 export async function markProductSold(productId: string): Promise<void> {
   const productRef = doc(db, "products", productId);
   const productSnap = await getDoc(productRef);
+
   if (!productSnap.exists()) return;
 
-  const product = { id: productSnap.id, ...productSnap.data() } as Product;
+  const product = productSnap.data() as Product;
   const newStock = Math.max(Number(product.stock || 0) - 1, 0);
 
   await updateDoc(productRef, {
@@ -225,6 +257,7 @@ export async function getOptionDocs(
 
 export async function addOption(type: OptionType, name: string): Promise<void> {
   const cleanName = name.trim();
+
   if (!cleanName) throw new Error("Informe um nome válido.");
 
   await addDoc(collection(db, "options", type, "items"), {
@@ -239,6 +272,7 @@ export async function editOption(
   name: string,
 ): Promise<void> {
   const cleanName = name.trim();
+
   if (!cleanName) throw new Error("Informe um nome válido.");
 
   await updateDoc(doc(db, "options", type, "items", id), {
@@ -335,11 +369,45 @@ export async function updateSaleStatus(
 ): Promise<void> {
   const saleRef = doc(db, "sales", id);
   const saleSnap = await getDoc(saleRef);
+
   if (!saleSnap.exists()) return;
 
-  const sale = { id: saleSnap.id, ...saleSnap.data() } as SaleWithInventory;
+  const sale = {
+    id: saleSnap.id,
+    ...saleSnap.data(),
+  } as SaleWithInventory;
 
-  if (!sale.inventoryProcessed && status !== "cancelado") {
+  const previousStatus = sale.status;
+
+  if (status === "cancelado") {
+    await restoreStockFromSale(sale);
+
+    await updateDoc(saleRef, {
+      status: "cancelado",
+      trackingCode: trackingCode || sale.trackingCode || "",
+      cancelApproved: true,
+      cancelApprovedAt: Date.now(),
+      inventoryProcessed: false,
+      inventoryRestored: true,
+      updatedAt: Date.now(),
+    });
+
+    return;
+  }
+
+  if (
+    sale.inventoryRestored &&
+    status !== "cancelado" &&
+    previousStatus === "cancelado"
+  ) {
+    await reserveStockFromSale({
+      ...sale,
+      inventoryProcessed: false,
+      inventoryRestored: false,
+    });
+  }
+
+  if (!sale.inventoryProcessed && saleUsesStock(status)) {
     await reserveStockFromSale(sale);
   }
 
@@ -347,16 +415,11 @@ export async function updateSaleStatus(
     await confirmStockFromSale(sale);
   }
 
-  if (status === "cancelado" && !sale.inventoryRestored) {
-    await restoreStockFromSale(sale);
-  }
-
   await updateDoc(saleRef, {
     status,
     trackingCode: trackingCode || sale.trackingCode || "",
-    inventoryProcessed: status === "cancelado" ? false : true,
-    inventoryRestored:
-      status === "cancelado" ? true : sale.inventoryRestored || false,
+    inventoryProcessed: saleUsesStock(status),
+    inventoryRestored: false,
     updatedAt: Date.now(),
   });
 }
@@ -402,16 +465,20 @@ export async function requestCancelSale(
 export async function approveCancelSale(id: string): Promise<void> {
   const saleRef = doc(db, "sales", id);
   const saleSnap = await getDoc(saleRef);
+
   if (!saleSnap.exists()) return;
 
-  const sale = { id: saleSnap.id, ...saleSnap.data() } as SaleWithInventory;
+  const sale = {
+    id: saleSnap.id,
+    ...saleSnap.data(),
+  } as SaleWithInventory;
 
-  if (!sale.inventoryRestored) {
-    await restoreStockFromSale(sale);
-  }
+  await restoreStockFromSale(sale);
 
   await updateDoc(saleRef, {
     status: "cancelado",
+    cancelApproved: true,
+    cancelApprovedAt: Date.now(),
     inventoryProcessed: false,
     inventoryRestored: true,
     updatedAt: Date.now(),
@@ -429,7 +496,9 @@ export async function getCustomerData(
   userId: string,
 ): Promise<CustomerData | null> {
   const snap = await getDoc(doc(db, "customers", userId));
+
   if (!snap.exists()) return null;
+
   return snap.data() as CustomerData;
 }
 
