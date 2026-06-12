@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera } from "lucide-react";
-import { getOptions, saveProduct } from "@/lib/firestore";
-import { OptionType, Product, ShippingProfile } from "@/types";
-import { theme } from "@/lib/theme";
+import { Camera, Plus } from "lucide-react";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { storage } from "@/lib/firebase";
-import OptionManagerModal from "./OptionManagerModal";
 import ReactCrop, { type Crop, type PixelCrop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
+
+import { getOptions, saveProduct } from "@/lib/firestore";
+import { storage } from "@/lib/firebase";
+import { OptionType, Product, ShippingProfile } from "@/types";
+import { theme } from "@/lib/theme";
+import OptionManagerModal from "./OptionManagerModal";
 
 type ProductForm = Omit<Product, "id"> & {
   shippingProfile?: ShippingProfile | "";
@@ -383,11 +384,12 @@ export default function ProductModal({
             padding: 24,
           }}
         >
-          <div className="d-flex justify-content-between align-items-center mb-4">
+          <div className="d-flex justify-content-between align-items-center mb-4 gap-3">
             <div>
               <h3 className="fw-bold mb-1">
                 {product ? "Editar produto" : "Cadastrar produto"}
               </h3>
+
               <p className="mb-0" style={{ color: theme.brownSoft }}>
                 Cadastre as informações da peça e selecione o perfil de frete.
               </p>
@@ -398,6 +400,7 @@ export default function ProductModal({
               className="btn btn-outline-secondary"
               onClick={onClose}
               disabled={uploading || saving}
+              style={{ borderRadius: 999 }}
             >
               Fechar
             </button>
@@ -463,11 +466,19 @@ export default function ProductModal({
                   <button
                     type="button"
                     className="btn btn-outline-secondary"
+                    title={`Cadastrar ${field.label}`}
+                    aria-label={`Cadastrar ${field.label}`}
                     onClick={() =>
                       setManager({ type: field.type, title: field.label })
                     }
+                    style={{
+                      width: 44,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
                   >
-                    +
+                    <Plus size={18} />
                   </button>
                 </div>
               </div>
@@ -621,6 +632,7 @@ export default function ProductModal({
                   className="btn btn-outline-secondary"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading || saving}
+                  style={{ borderRadius: 999 }}
                 >
                   Anexar imagem
                 </button>
@@ -662,10 +674,19 @@ export default function ProductModal({
                     <button
                       type="button"
                       className="btn btn-sm btn-danger"
+                      title="Remover imagem"
+                      aria-label="Remover imagem"
                       style={{
                         position: "absolute",
                         top: 4,
                         right: 4,
+                        width: 28,
+                        height: 28,
+                        borderRadius: "50%",
+                        padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
                       }}
                       disabled={uploading || saving}
                       onClick={() =>
@@ -675,7 +696,7 @@ export default function ProductModal({
                         })
                       }
                     >
-                      x
+                      ×
                     </button>
                   </div>
                 ))}
@@ -777,6 +798,7 @@ export default function ProductModal({
                         setCompletedCrop(null);
                         setImageScale(1);
                       }}
+                      style={{ borderRadius: 999 }}
                     >
                       Cancelar
                     </button>
@@ -813,4 +835,3 @@ export default function ProductModal({
     </div>
   );
 }
-
