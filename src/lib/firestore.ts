@@ -395,11 +395,7 @@ export async function updateSaleStatus(
     return;
   }
 
-  if (
-    sale.inventoryRestored &&
-    status !== "cancelado" &&
-    previousStatus === "cancelado"
-  ) {
+  if (sale.inventoryRestored && previousStatus === "cancelado") {
     await reserveStockFromSale({
       ...sale,
       inventoryProcessed: false,
