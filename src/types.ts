@@ -8,6 +8,7 @@ export type SaleStatus =
   | "aguardando_pagamento"
   | "pago"
   | "separando"
+  | "pronto_envio"
   | "pronto_retirada"
   | "enviado"
   | "entregue"
@@ -58,17 +59,9 @@ export type CustomerData = {
   name: string;
   email: string;
   phone: string;
-
-  /**
-   * CPF ou CNPJ do cliente/destinatário.
-   * Salvar somente números.
-   * Ex CPF: 00000000000
-   * Ex CNPJ: 00000000000000
-   */
   document?: string;
   cpf?: string;
   cnpj?: string;
-
   cep: string;
   address: string;
   number: string;
@@ -122,23 +115,17 @@ export type Sale = {
   deliveryPrice: number;
   total: number;
   status: SaleStatus;
-
   trackingCode?: string;
-
   cancelRequested?: boolean;
   cancelReason?: string;
-
   melhorEnvioOrderId?: string;
   melhorEnvioPrintUrl?: string;
   melhorEnvioTrackingCode?: string;
   melhorEnvioStatus?: string;
-
   inventoryProcessed?: boolean;
   inventoryRestored?: boolean;
-
   createdAt: number;
   updatedAt: number;
-
   paymentUrl?: string;
   mercadoPagoPreferenceId?: string;
 };

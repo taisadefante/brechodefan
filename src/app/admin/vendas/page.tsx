@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, Printer, Tag } from "lucide-react";
+import { ChevronDown, ChevronUp, Printer, Tag, X } from "lucide-react";
 
 import {
   approveCancelSale,
@@ -37,6 +37,7 @@ const statuses: SaleStatus[] = [
   "aguardando_pagamento",
   "pago",
   "separando",
+  "pronto_envio",
   "pronto_retirada",
   "enviado",
   "entregue",
@@ -183,6 +184,9 @@ function AdminVendasContent() {
   const [sales, setSales] = useState<SaleWithDocument[]>([]);
   const [tracking, setTracking] = useState<Record<string, string>>({});
   const [openSaleId, setOpenSaleId] = useState<string | null>(null);
+  const [updatingSaleId, setUpdatingSaleId] = useState<string | null>(null);
+  const [saleToGenerateLabel, setSaleToGenerateLabel] =
+    useState<SaleWithDocument | null>(null);
   const [generatingLabel, setGeneratingLabel] = useState<
     Record<string, boolean>
   >({});
@@ -204,15 +208,49 @@ function AdminVendasContent() {
   }, [adminUser, isAdmin]);
 
   async function changeStatus(id: string, status: SaleStatus) {
-    await updateSaleStatus(id, status, tracking[id]);
-    await load();
+    const previousSales = sales;
+
+    setUpdatingSaleId(id);
+
+    setSales((currentSales) =>
+      currentSales.map((sale) =>
+        sale.id === id
+          ? {
+              ...sale,
+              status,
+              trackingCode: tracking[id] ?? sale.trackingCode ?? "",
+              updatedAt: Date.now(),
+            }
+          : sale,
+      ),
+    );
+
+    try {
+      await updateSaleStatus(id, status, tracking[id]);
+      await load();
+    } catch (error) {
+      console.error("Erro ao atualizar status:", error);
+      setSales(previousSales);
+      alert("Erro ao atualizar status da venda.");
+    } finally {
+      setUpdatingSaleId(null);
+    }
   }
 
   async function approveCancel(id: string) {
     if (!confirm("Aprovar cancelamento e liberar produtos?")) return;
 
-    await approveCancelSale(id);
-    await load();
+    setUpdatingSaleId(id);
+
+    try {
+      await approveCancelSale(id);
+      await load();
+    } catch (error) {
+      console.error("Erro ao aprovar cancelamento:", error);
+      alert("Erro ao aprovar cancelamento.");
+    } finally {
+      setUpdatingSaleId(null);
+    }
   }
 
   async function readApiResponse(response: Response): Promise<ApiResponseData> {
@@ -327,9 +365,13 @@ function AdminVendasContent() {
     }
   }
 
-  async function generateLabel(sale: SaleWithDocument) {
-    const customerForLabel = validateLabelData(sale);
-    if (!customerForLabel) return;
+  function openGenerateLabelModal(sale: SaleWithDocument) {
+    if (sale.status !== "pronto_envio") {
+      alert(
+        "Para comprar/gerar etiqueta, primeiro altere o status da venda para: Pronto para envio.",
+      );
+      return;
+    }
 
     if (sale.melhorEnvioOrderId || sale.melhorEnvioPrintUrl) {
       alert(
@@ -338,11 +380,25 @@ function AdminVendasContent() {
       return;
     }
 
-    const confirmGenerate = window.confirm(
-      "Atenção: gerar etiqueta agora pode comprar a etiqueta no Melhor Envio. Deseja continuar?",
-    );
+    const customerForLabel = validateLabelData(sale);
+    if (!customerForLabel) return;
 
-    if (!confirmGenerate) return;
+    setSaleToGenerateLabel(sale);
+  }
+
+  async function confirmGenerateLabel() {
+    if (!saleToGenerateLabel) return;
+
+    const sale = saleToGenerateLabel;
+
+    if (sale.status !== "pronto_envio") {
+      alert("A venda precisa estar com status Pronto para envio.");
+      setSaleToGenerateLabel(null);
+      return;
+    }
+
+    const customerForLabel = validateLabelData(sale);
+    if (!customerForLabel) return;
 
     setGeneratingLabel((prev) => ({ ...prev, [sale.id]: true }));
 
@@ -384,6 +440,7 @@ function AdminVendasContent() {
         trackingCode: sale.trackingCode || "",
       });
 
+      setSaleToGenerateLabel(null);
       await load();
 
       if (data.printUrl) {
@@ -464,6 +521,114 @@ function AdminVendasContent() {
 
   return (
     <main className="container pb-5">
+      {saleToGenerateLabel && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              background: "#fffaf2",
+              borderRadius: 24,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+              border: `1px solid ${theme.border}`,
+              padding: 24,
+            }}
+          >
+            <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
+              <div>
+                <h4 className="fw-bold mb-1">Confirmar geração de etiqueta</h4>
+                <p className="mb-0" style={{ color: theme.brownSoft }}>
+                  Essa ação pode comprar a etiqueta no Melhor Envio.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary"
+                style={{ borderRadius: 999 }}
+                onClick={() => setSaleToGenerateLabel(null)}
+                disabled={Boolean(generatingLabel[saleToGenerateLabel.id])}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div
+              className="p-3 mb-3"
+              style={{
+                background: "#fff",
+                borderRadius: 18,
+                border: `1px solid ${theme.border}`,
+              }}
+            >
+              <p className="mb-1">
+                <strong>Pedido:</strong> #{saleToGenerateLabel.id.slice(0, 8)}
+              </p>
+
+              <p className="mb-1">
+                <strong>Cliente:</strong>{" "}
+                {saleToGenerateLabel.customer?.name || "Não informado"}
+              </p>
+
+              <p className="mb-1">
+                <strong>Frete:</strong>{" "}
+                {saleToGenerateLabel.shippingOption?.company || "Não informado"}{" "}
+                - {saleToGenerateLabel.shippingOption?.name || "Não informado"}
+              </p>
+
+              <p className="mb-0">
+                <strong>Valor do frete:</strong>{" "}
+                {formatMoney(saleToGenerateLabel.deliveryPrice || 0)}
+              </p>
+            </div>
+
+            <div className="alert alert-warning py-2">
+              Confira se o pedido está realmente <strong>pronto para envio</strong>,
+              com produto separado, embalagem conferida e dados do cliente corretos.
+            </div>
+
+            <div className="d-flex flex-wrap justify-content-end gap-2 mt-3">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                style={{ borderRadius: 999 }}
+                onClick={() => setSaleToGenerateLabel(null)}
+                disabled={Boolean(generatingLabel[saleToGenerateLabel.id])}
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                className="btn"
+                style={{
+                  background: theme.brownDark,
+                  color: "#fff",
+                  borderRadius: 999,
+                }}
+                onClick={confirmGenerateLabel}
+                disabled={Boolean(generatingLabel[saleToGenerateLabel.id])}
+              >
+                {generatingLabel[saleToGenerateLabel.id]
+                  ? "Gerando etiqueta..."
+                  : "Confirmar e gerar etiqueta"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div
         className="mb-4 p-4 text-center"
         style={{
@@ -494,10 +659,12 @@ function AdminVendasContent() {
             type="button"
             onClick={load}
             className="btn btn-sm"
+            disabled={Boolean(updatingSaleId)}
             style={{
               background: theme.brownDark,
               color: "#fff",
               borderRadius: 999,
+              opacity: updatingSaleId ? 0.7 : 1,
             }}
           >
             Atualizar
@@ -508,6 +675,12 @@ function AdminVendasContent() {
           const isOpen = openSaleId === sale.id;
           const shippingAddress = sale.shippingAddress || null;
           const customerDocument = getCustomerDocument(sale.customer);
+          const isUpdatingThisSale = updatingSaleId === sale.id;
+
+          const canBuyLabel =
+            sale.status === "pronto_envio" &&
+            !sale.melhorEnvioOrderId &&
+            !sale.melhorEnvioPrintUrl;
 
           return (
             <div
@@ -551,7 +724,9 @@ function AdminVendasContent() {
                         padding: "8px 10px",
                       }}
                     >
-                      {statusLabel(sale.status)}
+                      {isUpdatingThisSale
+                        ? "Salvando..."
+                        : statusLabel(sale.status)}
                     </span>
 
                     <strong>{formatMoney(sale.total || 0)}</strong>
@@ -764,6 +939,7 @@ function AdminVendasContent() {
                     <select
                       className="form-select mb-2"
                       value={sale.status}
+                      disabled={isUpdatingThisSale}
                       onChange={(event) =>
                         changeStatus(sale.id, event.target.value as SaleStatus)
                       }
@@ -775,11 +951,18 @@ function AdminVendasContent() {
                       ))}
                     </select>
 
+                    {isUpdatingThisSale && (
+                      <small className="d-block mb-2 text-muted">
+                        Salvando alteração...
+                      </small>
+                    )}
+
                     <label className="form-label">Código de rastreio</label>
 
                     <input
                       className="form-control mb-3"
                       value={tracking[sale.id] ?? sale.trackingCode ?? ""}
+                      disabled={isUpdatingThisSale}
                       onChange={(event) =>
                         setTracking((prev) => ({
                           ...prev,
@@ -789,24 +972,38 @@ function AdminVendasContent() {
                       placeholder="Ex: BR123456789BR"
                     />
 
+                    {sale.status !== "pronto_envio" &&
+                      !sale.melhorEnvioOrderId &&
+                      !sale.melhorEnvioPrintUrl && (
+                        <div className="alert alert-warning py-2">
+                          Para comprar/gerar etiqueta, altere o status para{" "}
+                          <strong>Pronto para envio</strong>.
+                        </div>
+                      )}
+
                     <div className="d-flex flex-wrap gap-2">
                       <button
                         type="button"
                         className="btn btn-sm"
+                        disabled={isUpdatingThisSale}
                         style={{
                           background: theme.brown,
                           color: "#fff",
                           borderRadius: 999,
+                          opacity: isUpdatingThisSale ? 0.7 : 1,
                         }}
                         onClick={() => changeStatus(sale.id, sale.status)}
                       >
-                        Salvar rastreio/status
+                        {isUpdatingThisSale
+                          ? "Salvando..."
+                          : "Salvar rastreio/status"}
                       </button>
 
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-secondary"
                         disabled={
+                          isUpdatingThisSale ||
                           generatingLabel[sale.id] ||
                           Boolean(sale.melhorEnvioOrderId)
                         }
@@ -823,15 +1020,30 @@ function AdminVendasContent() {
                         type="button"
                         className="btn btn-sm"
                         disabled={
+                          isUpdatingThisSale ||
                           generatingLabel[sale.id] ||
-                          Boolean(sale.melhorEnvioOrderId)
+                          !canBuyLabel
+                        }
+                        title={
+                          sale.status !== "pronto_envio"
+                            ? "Só é possível comprar/gerar etiqueta após colocar a venda como Pronto para envio."
+                            : ""
                         }
                         style={{
-                          background: theme.brownDark,
+                          background: canBuyLabel
+                            ? theme.brownDark
+                            : "#9ca3af",
                           color: "#fff",
                           borderRadius: 999,
+                          opacity:
+                            isUpdatingThisSale ||
+                            generatingLabel[sale.id] ||
+                            !canBuyLabel
+                              ? 0.7
+                              : 1,
+                          cursor: canBuyLabel ? "pointer" : "not-allowed",
                         }}
-                        onClick={() => generateLabel(sale)}
+                        onClick={() => openGenerateLabelModal(sale)}
                       >
                         <Tag size={15} className="me-1" />
                         {generatingLabel[sale.id]
@@ -855,6 +1067,7 @@ function AdminVendasContent() {
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-secondary"
+                        disabled={isUpdatingThisSale}
                         style={{ borderRadius: 999 }}
                         onClick={() => printSale(sale.id)}
                       >
@@ -866,10 +1079,13 @@ function AdminVendasContent() {
                         <button
                           type="button"
                           className="btn btn-sm btn-outline-danger"
+                          disabled={isUpdatingThisSale}
                           style={{ borderRadius: 999 }}
                           onClick={() => approveCancel(sale.id)}
                         >
-                          Aprovar cancelamento
+                          {isUpdatingThisSale
+                            ? "Aprovando..."
+                            : "Aprovar cancelamento"}
                         </button>
                       )}
                     </div>

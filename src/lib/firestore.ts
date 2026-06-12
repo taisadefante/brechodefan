@@ -37,6 +37,7 @@ function saleUsesStock(status: SaleStatus) {
     "aguardando_pagamento",
     "pago",
     "separando",
+    "pronto_envio",
     "pronto_retirada",
     "enviado",
     "entregue",
