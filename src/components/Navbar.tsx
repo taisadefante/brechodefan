@@ -24,19 +24,35 @@ export default function Navbar() {
   const { items } = useCart();
   const { user, logout } = useAuth();
 
+  const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const totalItems = items.reduce((acc, item) => acc + (item.quantity || 1), 0);
+  const isAdminPage = pathname?.startsWith("/admin");
 
-  const totalCart = items.reduce(
-    (acc, item) => acc + Number(item.price || 0) * (item.quantity || 1),
-    0,
-  );
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     setSearch(searchParams.get("busca") || "");
   }, [searchParams]);
+
+  if (isAdminPage) {
+    return null;
+  }
+
+  const totalItems = mounted
+    ? items.reduce((acc, item) => acc + Number(item.quantity || 1), 0)
+    : 0;
+
+  const totalCart = mounted
+    ? items.reduce(
+        (acc, item) =>
+          acc + Number(item.price || 0) * Number(item.quantity || 1),
+        0,
+      )
+    : 0;
 
   function handleSearch(value: string) {
     setSearch(value);
@@ -124,11 +140,10 @@ export default function Navbar() {
                 </Link>
 
                 <button
+                  type="button"
                   onClick={logout}
                   className="btn btn-outline-secondary"
-                  style={{
-                    borderRadius: 999,
-                  }}
+                  style={{ borderRadius: 999 }}
                 >
                   Sair
                 </button>
@@ -166,8 +181,9 @@ export default function Navbar() {
               >
                 <ShoppingCart size={24} />
 
-                {totalItems > 0 && (
+                {mounted && totalItems > 0 && (
                   <span
+                    suppressHydrationWarning
                     style={{
                       position: "absolute",
                       top: -7,
@@ -192,13 +208,14 @@ export default function Navbar() {
               </Link>
 
               <strong
+                suppressHydrationWarning
                 style={{
                   color: theme.brownDark,
                   whiteSpace: "nowrap",
                   fontSize: 15,
                 }}
               >
-                {formatMoney(totalCart)}
+                {mounted ? formatMoney(totalCart) : formatMoney(0)}
               </strong>
             </div>
           </div>
@@ -219,8 +236,9 @@ export default function Navbar() {
             >
               <ShoppingCart size={22} />
 
-              {totalItems > 0 && (
+              {mounted && totalItems > 0 && (
                 <span
+                  suppressHydrationWarning
                   style={{
                     position: "absolute",
                     top: -6,
@@ -244,8 +262,9 @@ export default function Navbar() {
             </Link>
 
             <button
+              type="button"
               className="btn"
-              onClick={() => setOpen(!open)}
+              onClick={() => setOpen((prev) => !prev)}
               style={{
                 color: theme.brownDark,
               }}
@@ -285,8 +304,13 @@ export default function Navbar() {
               </div>
             </form>
 
-            <div className="mb-3 fw-bold" style={{ color: theme.brownDark }}>
-              Carrinho: {totalItems} item(ns) — {formatMoney(totalCart)}
+            <div
+              className="mb-3 fw-bold"
+              style={{ color: theme.brownDark }}
+              suppressHydrationWarning
+            >
+              Carrinho: {mounted ? totalItems : 0} item(ns) —{" "}
+              {mounted ? formatMoney(totalCart) : formatMoney(0)}
             </div>
 
             <div className="d-flex flex-column gap-2">
@@ -316,7 +340,8 @@ export default function Navbar() {
                 onClick={closeMenu}
               >
                 <ShoppingCart size={17} className="me-2" />
-                Carrinho ({totalItems}) - {formatMoney(totalCart)}
+                Carrinho ({mounted ? totalItems : 0}) -{" "}
+                {mounted ? formatMoney(totalCart) : formatMoney(0)}
               </Link>
 
               {user ? (
@@ -330,6 +355,7 @@ export default function Navbar() {
                   </Link>
 
                   <button
+                    type="button"
                     className="btn btn-outline-secondary text-start"
                     onClick={async () => {
                       await logout();

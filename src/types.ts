@@ -58,6 +58,17 @@ export type CustomerData = {
   name: string;
   email: string;
   phone: string;
+
+  /**
+   * CPF ou CNPJ do cliente/destinatário.
+   * Salvar somente números.
+   * Ex CPF: 00000000000
+   * Ex CNPJ: 00000000000000
+   */
+  document?: string;
+  cpf?: string;
+  cnpj?: string;
+
   cep: string;
   address: string;
   number: string;
@@ -65,6 +76,24 @@ export type CustomerData = {
   district: string;
   city: string;
   state: string;
+};
+
+export type CustomerAddress = {
+  id: string;
+  userId: string;
+  name: string;
+  recipientName: string;
+  phone: string;
+  cep: string;
+  address: string;
+  number: string;
+  complement: string;
+  district: string;
+  city: string;
+  state: string;
+  isDefault?: boolean;
+  createdAt?: number;
+  updatedAt?: number;
 };
 
 export type CartItem = Product & {
@@ -85,6 +114,7 @@ export type Sale = {
   id: string;
   userId: string;
   customer: CustomerData;
+  shippingAddress?: CustomerAddress | null;
   items: CartItem[];
   subtotal: number;
   deliveryType: DeliveryType;
@@ -92,11 +122,23 @@ export type Sale = {
   deliveryPrice: number;
   total: number;
   status: SaleStatus;
+
   trackingCode?: string;
+
   cancelRequested?: boolean;
   cancelReason?: string;
+
+  melhorEnvioOrderId?: string;
+  melhorEnvioPrintUrl?: string;
+  melhorEnvioTrackingCode?: string;
+  melhorEnvioStatus?: string;
+
+  inventoryProcessed?: boolean;
+  inventoryRestored?: boolean;
+
   createdAt: number;
   updatedAt: number;
+
   paymentUrl?: string;
   mercadoPagoPreferenceId?: string;
 };

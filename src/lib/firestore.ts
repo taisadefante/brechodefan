@@ -14,71 +14,120 @@ import {
 import { db } from "./firebase";
 import {
   CartItem,
+  CustomerAddress,
   CustomerData,
   DeliveryType,
   OptionType,
   Product,
   Sale,
   SaleStatus,
+  ShippingOption,
 } from "@/types";
+
+type SaleWithInventory = Sale & {
+  inventoryProcessed?: boolean;
+  inventoryRestored?: boolean;
+};
+
+function saleUsesStock(status: SaleStatus) {
+  return (
+    status === "pago" ||
+    status === "separando" ||
+    status === "pronto_retirada" ||
+    status === "enviado" ||
+    status === "entregue"
+  );
+}
+
+function getItemQuantity(item: CartItem) {
+  return Math.max(Number(item.quantity || 1), 1);
+}
+
+async function reserveStockFromSale(sale: SaleWithInventory) {
+  if (sale.inventoryProcessed) return;
+
+  await Promise.all(
+    sale.items.map(async (item) => {
+      const productRef = doc(db, "products", item.id);
+      const productSnap = await getDoc(productRef);
+      if (!productSnap.exists()) return;
+
+      const product = { id: productSnap.id, ...productSnap.data() } as Product;
+      const quantity = getItemQuantity(item);
+      const currentStock = Math.max(Number(product.stock || 0), 0);
+      const newStock = Math.max(currentStock - quantity, 0);
+
+      await updateDoc(productRef, {
+        stock: newStock,
+        status: newStock > 0 ? "disponivel" : "reservado",
+        soldAt: null,
+        reservedUntil: null,
+        updatedAt: Date.now(),
+      });
+    }),
+  );
+}
+
+async function confirmStockFromSale(sale: SaleWithInventory) {
+  await Promise.all(
+    sale.items.map(async (item) => {
+      const productRef = doc(db, "products", item.id);
+      const productSnap = await getDoc(productRef);
+      if (!productSnap.exists()) return;
+
+      const product = { id: productSnap.id, ...productSnap.data() } as Product;
+      const currentStock = Math.max(Number(product.stock || 0), 0);
+
+      await updateDoc(productRef, {
+        status: currentStock > 0 ? "disponivel" : "vendido",
+        soldAt: currentStock > 0 ? null : Date.now(),
+        reservedUntil: null,
+        updatedAt: Date.now(),
+      });
+    }),
+  );
+}
+
+async function restoreStockFromSale(sale: SaleWithInventory) {
+  if (sale.inventoryRestored) return;
+
+  await Promise.all(
+    sale.items.map(async (item) => {
+      const productRef = doc(db, "products", item.id);
+      const productSnap = await getDoc(productRef);
+      if (!productSnap.exists()) return;
+
+      const product = { id: productSnap.id, ...productSnap.data() } as Product;
+      const quantity = getItemQuantity(item);
+      const currentStock = Math.max(Number(product.stock || 0), 0);
+      const newStock = currentStock + quantity;
+
+      await updateDoc(productRef, {
+        stock: newStock,
+        status: "disponivel",
+        soldAt: null,
+        reservedUntil: null,
+        updatedAt: Date.now(),
+      });
+    }),
+  );
+}
 
 export async function getProducts(includeSold = false): Promise<Product[]> {
   const snap = await getDocs(
     query(collection(db, "products"), orderBy("createdAt", "desc")),
   );
 
-  const now = Date.now();
-
   const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Product);
 
-  const expiredReserved = products.filter(
-    (product) =>
-      product.status === "reservado" &&
-      product.reservedUntil !== undefined &&
-      product.reservedUntil !== null &&
-      product.reservedUntil < now,
-  );
-
-  await Promise.all(
-    expiredReserved.map((product) =>
-      updateDoc(doc(db, "products", product.id), {
-        status: "disponivel",
-        reservedUntil: null,
-        updatedAt: now,
-      }),
-    ),
-  );
-
-  const normalizedProducts: Product[] = products.map((product) => {
-    if (
-      product.status === "reservado" &&
-      product.reservedUntil !== undefined &&
-      product.reservedUntil !== null &&
-      product.reservedUntil < now
-    ) {
-      const normalizedProduct: Product = {
-        ...product,
-        status: "disponivel",
-        reservedUntil: null,
-        updatedAt: now,
-      };
-
-      return normalizedProduct;
-    }
-
-    return product;
-  });
-
-  return normalizedProducts.filter(
+  return products.filter(
     (product) => includeSold || product.status !== "vendido",
   );
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
   const snap = await getDoc(doc(db, "products", id));
-
   if (!snap.exists()) return null;
-
   return { id: snap.id, ...snap.data() } as Product;
 }
 
@@ -87,9 +136,17 @@ export async function saveProduct(
   id?: string,
 ): Promise<string> {
   const productId = id || ("id" in product ? product.id : undefined);
+  const stock = Math.max(Number(product.stock || 0), 0);
 
   const payload = {
     ...product,
+    stock,
+    status:
+      stock > 0 && product.status === "vendido"
+        ? "disponivel"
+        : product.status,
+    soldAt:
+      stock > 0 && product.status === "vendido" ? null : product.soldAt || null,
     updatedAt: Date.now(),
   };
 
@@ -115,7 +172,6 @@ export async function deleteProduct(id: string): Promise<void> {
 export async function reserveProduct(productId: string): Promise<void> {
   await updateDoc(doc(db, "products", productId), {
     status: "reservado",
-    reservedUntil: Date.now() + 2 * 60 * 60 * 1000,
     updatedAt: Date.now(),
   });
 }
@@ -124,14 +180,23 @@ export async function releaseProduct(productId: string): Promise<void> {
   await updateDoc(doc(db, "products", productId), {
     status: "disponivel",
     reservedUntil: null,
+    soldAt: null,
     updatedAt: Date.now(),
   });
 }
 
 export async function markProductSold(productId: string): Promise<void> {
-  await updateDoc(doc(db, "products", productId), {
-    status: "vendido",
-    soldAt: Date.now(),
+  const productRef = doc(db, "products", productId);
+  const productSnap = await getDoc(productRef);
+  if (!productSnap.exists()) return;
+
+  const product = { id: productSnap.id, ...productSnap.data() } as Product;
+  const newStock = Math.max(Number(product.stock || 0) - 1, 0);
+
+  await updateDoc(productRef, {
+    stock: newStock,
+    status: newStock > 0 ? "disponivel" : "vendido",
+    soldAt: newStock > 0 ? null : Date.now(),
     reservedUntil: null,
     updatedAt: Date.now(),
   });
@@ -160,10 +225,7 @@ export async function getOptionDocs(
 
 export async function addOption(type: OptionType, name: string): Promise<void> {
   const cleanName = name.trim();
-
-  if (!cleanName) {
-    throw new Error("Informe um nome válido.");
-  }
+  if (!cleanName) throw new Error("Informe um nome válido.");
 
   await addDoc(collection(db, "options", type, "items"), {
     name: cleanName,
@@ -177,10 +239,7 @@ export async function editOption(
   name: string,
 ): Promise<void> {
   const cleanName = name.trim();
-
-  if (!cleanName) {
-    throw new Error("Informe um nome válido.");
-  }
+  if (!cleanName) throw new Error("Informe um nome válido.");
 
   await updateDoc(doc(db, "options", type, "items", id), {
     name: cleanName,
@@ -198,31 +257,53 @@ export async function deleteOption(
 export async function createSale(params: {
   userId: string;
   customer: CustomerData;
+  shippingAddress?: CustomerAddress | null;
   items: CartItem[];
   subtotal: number;
   deliveryType: DeliveryType;
   deliveryPrice: number;
+  shippingOption?: ShippingOption | null;
   paymentUrl?: string;
   mercadoPagoPreferenceId?: string;
 }): Promise<string> {
   const total = params.subtotal + params.deliveryPrice;
 
-  const sale: Omit<Sale, "id"> = {
+  const saleData: Omit<SaleWithInventory, "id"> = {
     userId: params.userId,
     customer: params.customer,
+    shippingAddress: params.shippingAddress || null,
     items: params.items,
     subtotal: params.subtotal,
     deliveryType: params.deliveryType,
     deliveryPrice: params.deliveryPrice,
+    shippingOption: params.shippingOption || null,
     total,
     status: "aguardando_pagamento",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     paymentUrl: params.paymentUrl || "",
     mercadoPagoPreferenceId: params.mercadoPagoPreferenceId || "",
+    melhorEnvioOrderId: "",
+    melhorEnvioPrintUrl: "",
+    trackingCode: "",
+    inventoryProcessed: false,
+    inventoryRestored: false,
   };
 
-  const ref = await addDoc(collection(db, "sales"), sale);
+  const ref = await addDoc(collection(db, "sales"), saleData);
+
+  const sale: SaleWithInventory = {
+    id: ref.id,
+    ...saleData,
+  };
+
+  await reserveStockFromSale(sale);
+
+  await updateDoc(doc(db, "sales", ref.id), {
+    inventoryProcessed: true,
+    inventoryRestored: false,
+    updatedAt: Date.now(),
+  });
 
   return ref.id;
 }
@@ -252,25 +333,58 @@ export async function updateSaleStatus(
   status: SaleStatus,
   trackingCode?: string,
 ): Promise<void> {
-  await updateDoc(doc(db, "sales", id), {
+  const saleRef = doc(db, "sales", id);
+  const saleSnap = await getDoc(saleRef);
+  if (!saleSnap.exists()) return;
+
+  const sale = { id: saleSnap.id, ...saleSnap.data() } as SaleWithInventory;
+
+  if (!sale.inventoryProcessed && status !== "cancelado") {
+    await reserveStockFromSale(sale);
+  }
+
+  if (saleUsesStock(status)) {
+    await confirmStockFromSale(sale);
+  }
+
+  if (status === "cancelado" && !sale.inventoryRestored) {
+    await restoreStockFromSale(sale);
+  }
+
+  await updateDoc(saleRef, {
     status,
-    trackingCode: trackingCode || "",
+    trackingCode: trackingCode || sale.trackingCode || "",
+    inventoryProcessed: status === "cancelado" ? false : true,
+    inventoryRestored:
+      status === "cancelado" ? true : sale.inventoryRestored || false,
     updatedAt: Date.now(),
   });
+}
 
-  if (
-    status === "pago" ||
-    status === "separando" ||
-    status === "pronto_retirada" ||
-    status === "enviado"
-  ) {
-    const saleSnap = await getDoc(doc(db, "sales", id));
-    const sale = saleSnap.data() as Sale | undefined;
+export async function updateSaleShippingLabel(
+  id: string,
+  data: {
+    melhorEnvioOrderId?: string;
+    melhorEnvioPrintUrl?: string;
+    trackingCode?: string;
+  },
+): Promise<void> {
+  await updateDoc(doc(db, "sales", id), {
+    melhorEnvioOrderId: data.melhorEnvioOrderId || "",
+    melhorEnvioPrintUrl: data.melhorEnvioPrintUrl || "",
+    trackingCode: data.trackingCode || "",
+    updatedAt: Date.now(),
+  });
+}
 
-    if (sale?.items?.length) {
-      await Promise.all(sale.items.map((item) => markProductSold(item.id)));
-    }
-  }
+export async function updateSaleShippingOption(
+  id: string,
+  shippingOption: ShippingOption | null,
+): Promise<void> {
+  await updateDoc(doc(db, "sales", id), {
+    shippingOption,
+    updatedAt: Date.now(),
+  });
 }
 
 export async function requestCancelSale(
@@ -286,17 +400,22 @@ export async function requestCancelSale(
 }
 
 export async function approveCancelSale(id: string): Promise<void> {
-  const saleSnap = await getDoc(doc(db, "sales", id));
-  const sale = saleSnap.data() as Sale | undefined;
+  const saleRef = doc(db, "sales", id);
+  const saleSnap = await getDoc(saleRef);
+  if (!saleSnap.exists()) return;
 
-  await updateDoc(doc(db, "sales", id), {
+  const sale = { id: saleSnap.id, ...saleSnap.data() } as SaleWithInventory;
+
+  if (!sale.inventoryRestored) {
+    await restoreStockFromSale(sale);
+  }
+
+  await updateDoc(saleRef, {
     status: "cancelado",
+    inventoryProcessed: false,
+    inventoryRestored: true,
     updatedAt: Date.now(),
   });
-
-  if (sale?.items?.length) {
-    await Promise.all(sale.items.map((item) => releaseProduct(item.id)));
-  }
 }
 
 export async function saveCustomerData(
@@ -310,8 +429,114 @@ export async function getCustomerData(
   userId: string,
 ): Promise<CustomerData | null> {
   const snap = await getDoc(doc(db, "customers", userId));
-
   if (!snap.exists()) return null;
-
   return snap.data() as CustomerData;
+}
+
+export async function getCustomerAddresses(
+  userId: string,
+): Promise<CustomerAddress[]> {
+  const snap = await getDocs(
+    query(
+      collection(db, "customers", userId, "addresses"),
+      orderBy("createdAt", "desc"),
+    ),
+  );
+
+  return snap.docs.map(
+    (d) =>
+      ({
+        id: d.id,
+        userId,
+        ...d.data(),
+      }) as CustomerAddress,
+  );
+}
+
+export async function saveCustomerAddress(
+  userId: string,
+  address: Omit<CustomerAddress, "id" | "userId">,
+  id?: string,
+): Promise<string> {
+  const payload = {
+    ...address,
+    userId,
+    updatedAt: Date.now(),
+  };
+
+  if (address.isDefault) {
+    const addresses = await getCustomerAddresses(userId);
+
+    await Promise.all(
+      addresses.map((item) =>
+        updateDoc(doc(db, "customers", userId, "addresses", item.id), {
+          isDefault: false,
+          updatedAt: Date.now(),
+        }),
+      ),
+    );
+  }
+
+  if (id) {
+    await updateDoc(doc(db, "customers", userId, "addresses", id), payload);
+    return id;
+  }
+
+  const ref = await addDoc(collection(db, "customers", userId, "addresses"), {
+    ...payload,
+    createdAt: Date.now(),
+  });
+
+  return ref.id;
+}
+
+export async function deleteCustomerAddress(
+  userId: string,
+  addressId: string,
+): Promise<void> {
+  await deleteDoc(doc(db, "customers", userId, "addresses", addressId));
+}
+
+export async function setDefaultCustomerAddress(
+  userId: string,
+  addressId: string,
+): Promise<void> {
+  const addresses = await getCustomerAddresses(userId);
+
+  await Promise.all(
+    addresses.map((item) =>
+      updateDoc(doc(db, "customers", userId, "addresses", item.id), {
+        isDefault: item.id === addressId,
+        updatedAt: Date.now(),
+      }),
+    ),
+  );
+}
+
+export async function getAllCustomerAddresses(): Promise<CustomerAddress[]> {
+  const customersSnap = await getDocs(collection(db, "customers"));
+  const allAddresses: CustomerAddress[] = [];
+
+  await Promise.all(
+    customersSnap.docs.map(async (customerDoc) => {
+      const addressesSnap = await getDocs(
+        query(
+          collection(db, "customers", customerDoc.id, "addresses"),
+          orderBy("createdAt", "desc"),
+        ),
+      );
+
+      addressesSnap.docs.forEach((addressDoc) => {
+        allAddresses.push({
+          id: addressDoc.id,
+          userId: customerDoc.id,
+          ...addressDoc.data(),
+        } as CustomerAddress);
+      });
+    }),
+  );
+
+  return allAddresses.sort(
+    (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),
+  );
 }

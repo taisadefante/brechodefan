@@ -1,32 +1,30 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { Eye, EyeOff, Lock, LogOut } from "lucide-react";
 import {
-  Eye,
-  EyeOff,
-  Lock,
-  Package,
-  ShoppingBag,
-  Pencil,
-  Trash2,
-} from "lucide-react";
-import { deleteProduct, getAllSales, getProducts } from "../../lib/firestore";
-import { useAuth } from "@/contexts/AuthContext";
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  User,
+} from "firebase/auth";
+
+import { adminAuth } from "@/lib/firebase-admin-auth";
+import { getAllSales, getProducts } from "@/lib/firestore";
 import { Product, Sale } from "@/types";
 import { formatMoney } from "@/lib/utils";
 import { theme } from "@/lib/theme";
-import ProductModal from "@/components/admin/ProductModal";
 
-const ADMIN_EMAIL = "taisadefante@hotmail.com";
+const ADMIN_EMAIL =
+  process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() ||
+  "taisadefante@hotmail.com";
 
 function AdminContent() {
-  const { user, loading, isAdmin, login, logout } = useAuth();
+  const [adminUser, setAdminUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
-  const [modal, setModal] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const [email, setEmail] = useState(ADMIN_EMAIL);
   const [password, setPassword] = useState("");
@@ -34,29 +32,53 @@ function AdminContent() {
   const [erro, setErro] = useState("");
   const [logging, setLogging] = useState(false);
 
+  const isAdmin =
+    !!adminUser?.email && adminUser.email.toLowerCase() === ADMIN_EMAIL;
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(adminAuth, (currentUser) => {
+      setAdminUser(currentUser);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   async function load() {
-    setProducts(await getProducts(true));
-    setSales(await getAllSales());
+    try {
+      const [productsList, salesList] = await Promise.all([
+        getProducts(true),
+        getAllSales(),
+      ]);
+
+      setProducts(productsList);
+      setSales(salesList);
+    } catch (error) {
+      console.error("Erro ao carregar painel admin:", error);
+    }
   }
 
   useEffect(() => {
-    if (user && isAdmin) {
+    if (adminUser && isAdmin) {
       load();
     }
-  }, [user, isAdmin]);
+  }, [adminUser, isAdmin]);
 
   async function handleAdminLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
     setErro("");
     setLogging(true);
 
     try {
-      if (email.trim().toLowerCase() !== ADMIN_EMAIL) {
+      const cleanEmail = email.trim().toLowerCase();
+
+      if (cleanEmail !== ADMIN_EMAIL) {
         setErro("Este e-mail não tem acesso ao painel administrativo.");
         return;
       }
 
-      await login(email.trim(), password);
+      await signInWithEmailAndPassword(adminAuth, cleanEmail, password);
     } catch {
       setErro("E-mail ou senha incorretos.");
     } finally {
@@ -64,47 +86,48 @@ function AdminContent() {
     }
   }
 
-  async function handleDeleteProduct(product: Product) {
-    if (!confirm(`Excluir o produto "${product.name}"?`)) return;
-
-    await deleteProduct(product.id);
-    await load();
-  }
-
-  function openNewProduct() {
-    setEditingProduct(null);
-    setModal(true);
-  }
-
-  function openEditProduct(product: Product) {
-    setEditingProduct(product);
-    setModal(true);
+  async function handleAdminLogout() {
+    await signOut(adminAuth);
+    setProducts([]);
+    setSales([]);
   }
 
   const stats = useMemo(() => {
     const month = new Date().getMonth();
     const year = new Date().getFullYear();
 
-    const validSales = sales.filter((s) => s.status !== "cancelado");
+    const validSales = sales.filter((sale) => sale.status !== "cancelado");
 
-    const monthSales = validSales.filter((s) => {
-      const d = new Date(s.createdAt);
-      return d.getMonth() === month && d.getFullYear() === year;
+    const monthSales = validSales.filter((sale) => {
+      const date = new Date(sale.createdAt);
+      return date.getMonth() === month && date.getFullYear() === year;
     });
 
     return {
-      active: products.filter((p) => p.status === "disponivel").length,
-      reserved: products.filter((p) => p.status === "reservado").length,
-      sold: products.filter((p) => p.status === "vendido").length,
-      revenue: monthSales.reduce((sum, s) => sum + Number(s.total || 0), 0),
+      available: products.filter((product) => product.status === "disponivel")
+        .length,
+      reserved: products.filter((product) => product.status === "reservado")
+        .length,
+      sold: products.filter((product) => product.status === "vendido").length,
+      archived: products.filter((product) => product.status === "arquivado")
+        .length,
+      stock: products.reduce(
+        (sum, product) => sum + Number(product.stock || 0),
+        0,
+      ),
+      salesCount: validSales.length,
+      revenue: monthSales.reduce(
+        (sum, sale) => sum + Number(sale.total || 0),
+        0,
+      ),
     };
   }, [products, sales]);
 
   if (loading) {
-    return <main className="container py-5">Carregando...</main>;
+    return <main className="container pb-5">Carregando...</main>;
   }
 
-  if (!user || !isAdmin) {
+  if (!adminUser || !isAdmin) {
     return (
       <main className="container py-5" style={{ maxWidth: 520 }}>
         <div
@@ -131,6 +154,7 @@ function AdminContent() {
             </div>
 
             <h1 className="fw-bold mb-1">Admin Defan Brechó</h1>
+
             <p className="mb-0" style={{ color: theme.brownSoft }}>
               Acesso exclusivo da administração.
             </p>
@@ -140,21 +164,23 @@ function AdminContent() {
 
           <form onSubmit={handleAdminLogin}>
             <label className="form-label">E-mail administrativo</label>
+
             <input
               className="form-control mb-3"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(event) => setEmail(event.target.value)}
               required
             />
 
             <label className="form-label">Senha</label>
+
             <div className="input-group mb-3">
               <input
                 className="form-control"
                 type={showPassword ? "text" : "password"}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(event) => setPassword(event.target.value)}
                 required
                 minLength={6}
               />
@@ -181,23 +207,15 @@ function AdminContent() {
               {logging ? "Entrando..." : "Entrar no admin"}
             </button>
           </form>
-
-          <Link
-            href="/"
-            className="btn btn-link w-100 mt-3"
-            style={{ color: theme.brown }}
-          >
-            Voltar para a loja
-          </Link>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="container py-5">
+    <main className="container pb-5">
       <div
-        className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4 p-3"
+        className="mb-4 p-4 text-center"
         style={{
           background: theme.ivory2,
           borderRadius: 24,
@@ -205,70 +223,40 @@ function AdminContent() {
           border: `1px solid ${theme.border}`,
         }}
       >
-        <div>
-          <h1 className="fw-bold mb-0">Admin Defan Brechó</h1>
-          <p className="mb-0" style={{ color: theme.brownSoft }}>
-            Controle produtos, vendas, estoque e faturamento.
-          </p>
-        </div>
+        <div className="d-flex justify-content-between align-items-center gap-3 flex-wrap">
+          <div className="text-start">
+            <h1 className="fw-bold mb-1">Painel Administrativo</h1>
 
-        <div className="d-flex flex-wrap gap-2">
-          <Link
-            href="/admin"
-            className="btn"
-            style={{
-              background: theme.brown,
-              color: "#fff",
-              borderRadius: 999,
-            }}
-          >
-            <Package size={16} className="me-1" />
-            Produtos
-          </Link>
+            <p className="mb-0" style={{ color: theme.brownSoft }}>
+              Visão geral da loja e das vendas.
+            </p>
+          </div>
 
-          <Link
-            href="/admin/vendas"
+          <button
+            type="button"
+            onClick={handleAdminLogout}
             className="btn btn-outline-secondary"
             style={{ borderRadius: 999 }}
           >
-            <ShoppingBag size={16} className="me-1" />
-            Vendas
-          </Link>
-
-          <button
-            type="button"
-            className="btn"
-            onClick={openNewProduct}
-            style={{
-              background: theme.brownDark,
-              color: "#fff",
-              borderRadius: 999,
-            }}
-          >
-            + Produto
-          </button>
-
-          <button
-            type="button"
-            onClick={logout}
-            className="btn btn-outline-danger"
-            style={{ borderRadius: 999 }}
-          >
-            Sair
+            <LogOut size={16} className="me-1" />
+            Sair do admin
           </button>
         </div>
       </div>
 
-      <div className="row g-3 mb-4">
+      <div className="row g-3">
         {[
-          ["Disponíveis", stats.active],
-          ["Reservados", stats.reserved],
-          ["Vendidos", stats.sold],
+          ["Produtos disponíveis", stats.available],
+          ["Produtos reservados", stats.reserved],
+          ["Produtos vendidos", stats.sold],
+          ["Produtos arquivados", stats.archived],
+          ["Estoque total", stats.stock],
+          ["Vendas registradas", stats.salesCount],
           ["Faturamento mensal", formatMoney(stats.revenue)],
         ].map(([label, value]) => (
-          <div className="col-md-3" key={String(label)}>
+          <div className="col-md-4" key={String(label)}>
             <div
-              className="p-4"
+              className="p-4 h-100"
               style={{
                 background: theme.ivory2,
                 borderRadius: 24,
@@ -276,132 +264,12 @@ function AdminContent() {
                 border: `1px solid ${theme.border}`,
               }}
             >
-              <small>{label}</small>
+              <small style={{ color: theme.brownSoft }}>{label}</small>
               <h3 className="fw-bold mb-0">{value}</h3>
             </div>
           </div>
         ))}
       </div>
-
-      <div
-        className="p-3"
-        style={{
-          background: theme.ivory2,
-          borderRadius: 24,
-          boxShadow: theme.shadow,
-          border: `1px solid ${theme.border}`,
-        }}
-      >
-        <div className="d-flex justify-content-between align-items-center mb-3">
-          <h4 className="fw-bold mb-0">Produtos</h4>
-
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={load}
-            style={{
-              background: theme.brownDark,
-              color: "#fff",
-              borderRadius: 999,
-            }}
-          >
-            Atualizar
-          </button>
-        </div>
-
-        <div className="table-responsive">
-          <table className="table align-middle">
-            <thead>
-              <tr>
-                <th>Produto</th>
-                <th>Categoria</th>
-                <th>Tamanho</th>
-                <th>Preço</th>
-                <th>Status</th>
-                <th style={{ width: 150 }}>Ações</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {products.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <div className="d-flex align-items-center gap-2">
-                      {p.images?.[0] ? (
-                        <img
-                          src={p.images[0]}
-                          style={{
-                            width: 54,
-                            height: 54,
-                            objectFit: "cover",
-                            borderRadius: 12,
-                          }}
-                          alt={p.name}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: 54,
-                            height: 54,
-                            borderRadius: 12,
-                            background: "#eadfce",
-                          }}
-                        />
-                      )}
-
-                      <strong>{p.name}</strong>
-                    </div>
-                  </td>
-
-                  <td>{p.category}</td>
-                  <td>{p.size}</td>
-                  <td>{formatMoney(p.price)}</td>
-                  <td>{p.status}</td>
-
-                  <td>
-                    <div className="d-flex gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary"
-                        onClick={() => openEditProduct(p)}
-                      >
-                        <Pencil size={15} />
-                      </button>
-
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-danger"
-                        onClick={() => handleDeleteProduct(p)}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-
-              {!products.length && (
-                <tr>
-                  <td colSpan={6} className="text-center py-4">
-                    Nenhum produto cadastrado ainda.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {modal && (
-        <ProductModal
-          product={editingProduct}
-          onClose={() => {
-            setModal(false);
-            setEditingProduct(null);
-          }}
-          onSaved={load}
-        />
-      )}
     </main>
   );
 }

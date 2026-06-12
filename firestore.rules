@@ -7,23 +7,31 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return request.auth != null && request.auth.token.email == "SEU_EMAIL_ADMIN_AQUI";
+      return request.auth != null
+        && request.auth.token.email == "taisadefante@hotmail.com";
     }
 
     match /products/{id} {
       allow read: if true;
-      allow write: if isAdmin();
-      allow update: if isSignedIn();
+      allow create, update, delete: if isAdmin();
     }
 
     match /sales/{id} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn();
-      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow update: if isAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow delete: if isAdmin();
     }
 
     match /customers/{id} {
-      allow read, write: if isSignedIn() && request.auth.uid == id;
+      allow read, write: if isSignedIn()
+        && request.auth.uid == id;
     }
 
     match /options/{type}/items/{id} {
