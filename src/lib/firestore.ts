@@ -317,7 +317,7 @@ export async function getOptionDocs(
   const filtered = docs.filter((item) => {
     if (!cleanParent) return true;
 
-    if (type === "tipos") {
+    if (type === "tipos" || type === "tamanhos") {
       return normalizeCompare(item.parentCategory) === cleanParent;
     }
 
@@ -345,7 +345,7 @@ async function optionAlreadyExists(
     if (item.id === ignoreId) return false;
     if (normalizeCompare(item.name) !== cleanName) return false;
 
-    if (type === "tipos") {
+    if (type === "tipos" || type === "tamanhos") {
       return normalizeCompare(item.parentCategory) === cleanParent;
     }
 
@@ -369,7 +369,7 @@ function buildOptionPayload(type: OptionType, name: string, parentValue = "") {
     updatedAt: Date.now(),
   };
 
-  if (type === "tipos") {
+  if (type === "tipos" || type === "tamanhos") {
     payload.parentCategory = parentValue || "";
     payload.parentType = "";
   }
@@ -399,10 +399,14 @@ export async function addOption(
     throw new Error("Selecione o tipo vinculado ao subtipo.");
   }
 
+  if (type === "tamanhos" && !parentValue) {
+    throw new Error("Selecione a categoria vinculada ao tamanho / idade.");
+  }
+
   const exists = await optionAlreadyExists(type, cleanName, parentValue);
 
   if (exists) {
-    throw new Error("Esta opção já está cadastrada.");
+    throw new Error("Esta opção já está cadastrada para este vínculo.");
   }
 
   await addDoc(collection(db, "options", type, "items"), {
@@ -429,10 +433,14 @@ export async function editOption(
     throw new Error("Selecione o tipo vinculado ao subtipo.");
   }
 
+  if (type === "tamanhos" && !parentValue) {
+    throw new Error("Selecione a categoria vinculada ao tamanho / idade.");
+  }
+
   const exists = await optionAlreadyExists(type, cleanName, parentValue, id);
 
   if (exists) {
-    throw new Error("Esta opção já está cadastrada.");
+    throw new Error("Esta opção já está cadastrada para este vínculo.");
   }
 
   await updateDoc(doc(db, "options", type, "items", id), {

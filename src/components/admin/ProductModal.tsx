@@ -88,7 +88,7 @@ const optionFields: {
   { key: "category", label: "Categoria", type: "categorias" },
   { key: "type", label: "Tipo", type: "tipos" },
   { key: "subtype", label: "Subtipo", type: "subtipos" },
-{ key: "size", label: "Tamanho / Idade", type: "tamanhos" },
+  { key: "size", label: "Tamanho / Idade", type: "tamanhos" },
   { key: "color", label: "Cor", type: "cores" },
   { key: "gender", label: "Sexo", type: "sexos" },
   { key: "brand", label: "Marca", type: "marcas" },
@@ -170,7 +170,6 @@ export default function ProductModal({
 
   const [options, setOptions] = useState<Record<string, string[]>>({
     categorias: [],
-    tamanhos: [],
     cores: [],
     sexos: [],
     condicoes: [DEFAULT_CONDITION],
@@ -179,6 +178,8 @@ export default function ProductModal({
 
   const [typeDocs, setTypeDocs] = useState<OptionDoc[]>([]);
   const [subtypeDocs, setSubtypeDocs] = useState<OptionDoc[]>([]);
+  const [sizeDocs, setSizeDocs] = useState<OptionDoc[]>([]);
+
   const [manager, setManager] = useState<{
     type: ExtendedOptionType;
     title: string;
@@ -214,12 +215,21 @@ export default function ProductModal({
     );
   }, [subtypeDocs, form.type]);
 
+  const availableSizes = useMemo(() => {
+    if (!form.category) return [];
+
+    return uniqueNames(
+      sizeDocs
+        .filter((item) => item.parentCategory === form.category)
+        .map((item) => item.name),
+    );
+  }, [sizeDocs, form.category]);
+
   async function loadOptions() {
     const loaded: Record<string, string[]> = {};
 
     const optionTypes: OptionType[] = [
       "categorias",
-      "tamanhos",
       "cores",
       "sexos",
       "condicoes",
@@ -233,14 +243,16 @@ export default function ProductModal({
     loaded.marcas = ensureOption(loaded.marcas || [], DEFAULT_BRAND);
     loaded.condicoes = ensureOption(loaded.condicoes || [], DEFAULT_CONDITION);
 
-    const [loadedTypes, loadedSubtypes] = await Promise.all([
+    const [loadedTypes, loadedSubtypes, loadedSizes] = await Promise.all([
       getOptionDocs("tipos"),
       getOptionDocs("subtipos"),
+      getOptionDocs("tamanhos"),
     ]);
 
     setOptions(loaded);
     setTypeDocs(loadedTypes);
     setSubtypeDocs(loadedSubtypes);
+    setSizeDocs(loadedSizes);
   }
 
   useEffect(() => {
@@ -369,24 +381,38 @@ export default function ProductModal({
   function getSelectOptions(fieldType: ExtendedOptionType) {
     if (fieldType === "tipos") return availableTypes;
     if (fieldType === "subtipos") return availableSubtypes;
+    if (fieldType === "tamanhos") return availableSizes;
+
     return options[fieldType] || [];
   }
 
   function getPlaceholder(fieldType: ExtendedOptionType) {
-    if (fieldType === "tipos" && !form.category) return "Selecione a categoria primeiro";
-    if (fieldType === "subtipos" && !form.type) return "Selecione o tipo primeiro";
+    if (fieldType === "tipos" && !form.category) {
+      return "Selecione a categoria primeiro";
+    }
+
+    if (fieldType === "subtipos" && !form.type) {
+      return "Selecione o tipo primeiro";
+    }
+
+    if (fieldType === "tamanhos" && !form.category) {
+      return "Selecione a categoria primeiro";
+    }
+
     return "Selecione";
   }
 
   function selectIsDisabled(fieldType: ExtendedOptionType) {
     if (fieldType === "tipos") return !form.category;
     if (fieldType === "subtipos") return !form.type;
+    if (fieldType === "tamanhos") return !form.category;
+
     return false;
   }
 
   function handleOptionChange(key: keyof ProductForm, value: string) {
     if (key === "category") {
-      setForm({ ...form, category: value, type: "", subtype: "" });
+      setForm({ ...form, category: value, type: "", subtype: "", size: "" });
       return;
     }
 
@@ -410,6 +436,11 @@ export default function ProductModal({
 
     if (field.type === "subtipos" && !form.type) {
       alert("Selecione um tipo antes de cadastrar subtipo.");
+      return;
+    }
+
+    if (field.type === "tamanhos" && !form.category) {
+      alert("Selecione uma categoria antes de cadastrar o tamanho / idade.");
       return;
     }
 
@@ -863,7 +894,9 @@ export default function ProductModal({
           type={manager.type}
           title={manager.title}
           parentCategory={
-            manager.type === "tipos" || manager.type === "subtipos"
+            manager.type === "tipos" ||
+            manager.type === "subtipos" ||
+            manager.type === "tamanhos"
               ? form.category || ""
               : ""
           }

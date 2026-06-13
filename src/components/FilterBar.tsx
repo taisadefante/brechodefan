@@ -37,10 +37,20 @@ function uniqueValues(products: Product[], key: keyof Product) {
   ).sort((a, b) => a.localeCompare(b));
 }
 
-function uniqueSizeAgeValues(products: Product[]) {
+function uniqueSizeAgeValues(products: Product[], filters: ProductFilters) {
+  if (!filters.category) return [];
+
+  const filteredByCategory = products.filter((product) => {
+    if (filters.category && product.category !== filters.category) return false;
+    if (filters.type && product.type !== filters.type) return false;
+    if (filters.subtype && product.subtype !== filters.subtype) return false;
+
+    return true;
+  });
+
   return Array.from(
     new Set(
-      products
+      filteredByCategory
         .flatMap((product) => [
           String(product.size || "").trim(),
           String(product.age || "").trim(),
@@ -165,6 +175,7 @@ export default function FilterBar({
     key: keyof ProductFilters;
     label: string;
     options: string[];
+    disabled?: boolean;
   }[] = [
     {
       key: "category",
@@ -188,8 +199,9 @@ export default function FilterBar({
     },
     {
       key: "size",
-      label: "Tamanho / Idade",
-      options: uniqueSizeAgeValues(products),
+      label: filters.category ? "Tamanho / Idade" : "Selecione categoria",
+      options: uniqueSizeAgeValues(products, filters),
+      disabled: !filters.category,
     },
     {
       key: "color",
@@ -217,10 +229,16 @@ export default function FilterBar({
     if (key === "category") {
       nextFilters.type = "";
       nextFilters.subtype = "";
+      nextFilters.size = "";
     }
 
     if (key === "type") {
       nextFilters.subtype = "";
+      nextFilters.size = "";
+    }
+
+    if (key === "subtype") {
+      nextFilters.size = "";
     }
 
     setFilters(nextFilters);
@@ -300,6 +318,7 @@ export default function FilterBar({
             <select
               className="form-select"
               value={filters[field.key] || ""}
+              disabled={field.disabled}
               onChange={(event) => updateFilter(field.key, event.target.value)}
               style={{
                 borderRadius: 999,

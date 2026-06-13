@@ -44,17 +44,21 @@ export default function OptionManagerModal({
 
   const isType = type === "tipos";
   const isSubtype = type === "subtipos";
+  const isSize = type === "tamanhos";
+
+  const needsCategory = isType || isSubtype || isSize;
 
   const helpText = useMemo(() => {
     if (isType) return "O tipo fica vinculado à categoria selecionada.";
     if (isSubtype) return "O subtipo fica vinculado ao tipo selecionado.";
+    if (isSize) return "O tamanho/idade fica vinculado à categoria selecionada.";
     return "Cadastre, edite ou exclua opções usadas no produto.";
-  }, [isType, isSubtype]);
+  }, [isType, isSubtype, isSize]);
 
   async function load() {
     const [docs, loadedCategories] = await Promise.all([
       getOptionDocs(type),
-      isType || isSubtype ? getOptions("categorias") : Promise.resolve([]),
+      needsCategory ? getOptions("categorias") : Promise.resolve([]),
     ]);
 
     setItems(docs);
@@ -63,7 +67,7 @@ export default function OptionManagerModal({
     const categoryToUse =
       parentCategory || selectedParentCategory || loadedCategories[0] || "";
 
-    if ((isType || isSubtype) && !selectedParentCategory && categoryToUse) {
+    if (needsCategory && !selectedParentCategory && categoryToUse) {
       setSelectedParentCategory(categoryToUse);
     }
 
@@ -118,8 +122,8 @@ export default function OptionManagerModal({
       return;
     }
 
-    if (isType && !selectedParentCategory) {
-      alert("Selecione a categoria para vincular o tipo.");
+    if ((isType || isSize) && !selectedParentCategory) {
+      alert("Selecione a categoria para vincular esta opção.");
       return;
     }
 
@@ -131,11 +135,12 @@ export default function OptionManagerModal({
     setSaving(true);
 
     try {
-      const parentValue = isType
-        ? selectedParentCategory
-        : isSubtype
-          ? selectedParentType
-          : "";
+      const parentValue =
+        isType || isSize
+          ? selectedParentCategory
+          : isSubtype
+            ? selectedParentType
+            : "";
 
       if (editing) {
         await editOption(type, editing, name.trim(), parentValue);
@@ -170,7 +175,7 @@ export default function OptionManagerModal({
   }
 
   const visibleItems = useMemo(() => {
-    if (isType && selectedParentCategory) {
+    if ((isType || isSize) && selectedParentCategory) {
       return items.filter(
         (item) => item.parentCategory === selectedParentCategory,
       );
@@ -181,7 +186,7 @@ export default function OptionManagerModal({
     }
 
     return items;
-  }, [items, isType, isSubtype, selectedParentCategory, selectedParentType]);
+  }, [items, isType, isSize, isSubtype, selectedParentCategory, selectedParentType]);
 
   return (
     <div
@@ -234,7 +239,7 @@ export default function OptionManagerModal({
           </button>
         </div>
 
-        {isType && (
+        {(isType || isSize) && (
           <div className="mb-3">
             <label className="form-label">Categoria vinculada</label>
 
@@ -318,7 +323,9 @@ export default function OptionManagerModal({
                 ? "Nome do tipo"
                 : isSubtype
                   ? "Nome do subtipo"
-                  : "Nome da opção"
+                  : isSize
+                    ? "Nome do tamanho / idade"
+                    : "Nome da opção"
             }
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -354,7 +361,7 @@ export default function OptionManagerModal({
             <div>
               <strong>{item.name}</strong>
 
-              {isType && item.parentCategory && (
+              {(isType || isSize) && item.parentCategory && (
                 <div style={{ fontSize: 12, color: theme.brownSoft }}>
                   Categoria: {item.parentCategory}
                 </div>
@@ -376,7 +383,7 @@ export default function OptionManagerModal({
                   setEditing(item.id);
                   setName(item.name);
 
-                  if (isType) {
+                  if (isType || isSize) {
                     setSelectedParentCategory(
                       item.parentCategory || parentCategory || "",
                     );
