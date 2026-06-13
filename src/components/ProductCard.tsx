@@ -54,12 +54,13 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
   const currentImage = images[index];
   const added = productIsInCart(cart, product.id);
 
+  const sizeAge = product.size || product.age || "";
+
   const details = [
     hasValue(product.category) && ["Categoria", product.category],
     hasValue(product.type) && ["Tipo", product.type],
     hasValue(product.subtype) && ["Subtipo", product.subtype],
-    hasValue(product.size) && ["Tamanho", product.size],
-    hasValue(product.age) && ["Idade", product.age],
+    hasValue(sizeAge) && ["Tamanho / Idade", sizeAge],
     hasValue(product.gender) && ["Sexo", product.gender],
     hasValue(product.brand) && ["Marca", product.brand],
   ].filter(Boolean) as [string, string][];

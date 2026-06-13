@@ -27,6 +27,7 @@ import ProductModal from "@/components/admin/ProductModal";
 import FilterBar, { productMatchesFilters } from "@/components/FilterBar";
 
 const ADMIN_EMAIL = "taisadefante@hotmail.com";
+const PRODUCTS_PER_PAGE = 30;
 
 const productStatuses: Product["status"][] = [
   "disponivel",
@@ -40,7 +41,6 @@ function productStatusLabel(status: Product["status"]) {
   if (status === "reservado") return "Reservado";
   if (status === "vendido") return "Vendido";
   if (status === "arquivado") return "Arquivado";
-
   return status;
 }
 
@@ -57,6 +57,7 @@ function AdminProdutosContent() {
 
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const [page, setPage] = useState(1);
 
   const [email, setEmail] = useState(ADMIN_EMAIL);
   const [password, setPassword] = useState("");
@@ -84,6 +85,10 @@ function AdminProdutosContent() {
       load();
     }
   }, [user, isAdmin]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filters]);
 
   async function handleAdminLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -164,6 +169,18 @@ function AdminProdutosContent() {
     );
   }, [products, search, filters]);
 
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE),
+  );
+
+  const paginatedProducts = useMemo(() => {
+    const start = (page - 1) * PRODUCTS_PER_PAGE;
+    const end = start + PRODUCTS_PER_PAGE;
+
+    return filteredProducts.slice(start, end);
+  }, [filteredProducts, page]);
+
   const stats = useMemo(() => {
     const month = new Date().getMonth();
     const year = new Date().getFullYear();
@@ -175,6 +192,21 @@ function AdminProdutosContent() {
       return date.getMonth() === month && date.getFullYear() === year;
     });
 
+    const totalStock = products.reduce(
+      (sum, product) => sum + Number(product.stock || 0),
+      0,
+    );
+
+    const stockValue = products.reduce((sum, product) => {
+      return sum + Number(product.price || 0) * Number(product.stock || 0);
+    }, 0);
+
+    const availableStockValue = products
+      .filter((product) => product.status === "disponivel")
+      .reduce((sum, product) => {
+        return sum + Number(product.price || 0) * Number(product.stock || 0);
+      }, 0);
+
     return {
       active: products.filter((product) => product.status === "disponivel")
         .length,
@@ -183,10 +215,9 @@ function AdminProdutosContent() {
       sold: products.filter((product) => product.status === "vendido").length,
       archived: products.filter((product) => product.status === "arquivado")
         .length,
-      totalStock: products.reduce(
-        (sum, product) => sum + Number(product.stock || 0),
-        0,
-      ),
+      totalStock,
+      stockValue,
+      availableStockValue,
       revenue: monthSales.reduce(
         (sum, sale) => sum + Number(sale.total || 0),
         0,
@@ -195,7 +226,9 @@ function AdminProdutosContent() {
   }, [products, sales]);
 
   if (loading) {
-    return <main className="container-fluid px-3 px-lg-4 py-5">Carregando...</main>;
+    return (
+      <main className="container-fluid px-3 px-lg-4 py-5">Carregando...</main>
+    );
   }
 
   if (!user || !isAdmin) {
@@ -352,9 +385,11 @@ function AdminProdutosContent() {
           ["Vendidos", stats.sold],
           ["Arquivados", stats.archived],
           ["Estoque total", stats.totalStock],
+          ["Valor total cadastrado", formatMoney(stats.stockValue)],
+          ["Valor disponível", formatMoney(stats.availableStockValue)],
           ["Faturamento mensal", formatMoney(stats.revenue)],
         ].map(([label, value]) => (
-          <div className="col-6 col-xl-2" key={String(label)}>
+          <div className="col-6 col-md-4 col-xl-3" key={String(label)}>
             <div
               className="p-3 h-100"
               style={{
@@ -388,12 +423,15 @@ function AdminProdutosContent() {
           overflow: "hidden",
         }}
       >
-        <div className="p-3 border-bottom">
-          <h4 className="fw-bold mb-1">Lista de produtos</h4>
+        <div className="p-3 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div>
+            <h4 className="fw-bold mb-1">Lista de produtos</h4>
 
-          <p className="mb-0" style={{ color: theme.brownSoft }}>
-            Altere o status na própria linha sem abrir o cadastro.
-          </p>
+            <p className="mb-0" style={{ color: theme.brownSoft }}>
+              Exibindo {paginatedProducts.length} de {filteredProducts.length}{" "}
+              produto(s). Página {page} de {totalPages}.
+            </p>
+          </div>
         </div>
 
         <div className="table-responsive">
@@ -404,7 +442,7 @@ function AdminProdutosContent() {
                 <th>Categoria</th>
                 <th>Tipo</th>
                 <th>Subtipo</th>
-                <th>Tamanho</th>
+<th>Tamanho / Idade</th>
                 <th>Sexo</th>
                 <th>Preço</th>
                 <th>Estoque</th>
@@ -414,7 +452,7 @@ function AdminProdutosContent() {
             </thead>
 
             <tbody>
-              {filteredProducts.map((product) => {
+              {paginatedProducts.map((product) => {
                 const isUpdating = updatingProductId === product.id;
 
                 return (
@@ -473,7 +511,7 @@ function AdminProdutosContent() {
                     <td>{product.category || "Não informado"}</td>
                     <td>{product.type || "Não informado"}</td>
                     <td>{product.subtype || "Não informado"}</td>
-                    <td>{product.size || "Não informado"}</td>
+<td>{product.size || product.age || "Não informado"}</td>
                     <td>{product.gender || "Não informado"}</td>
 
                     <td>
@@ -553,7 +591,7 @@ function AdminProdutosContent() {
                 );
               })}
 
-              {!filteredProducts.length && (
+              {!paginatedProducts.length && (
                 <tr>
                   <td colSpan={10} className="text-center py-4">
                     Nenhum produto encontrado com esses filtros.
@@ -563,6 +601,56 @@ function AdminProdutosContent() {
             </tbody>
           </table>
         </div>
+
+        {filteredProducts.length > PRODUCTS_PER_PAGE && (
+          <div className="p-3 border-top d-flex flex-wrap justify-content-center align-items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              disabled={page === 1}
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              style={{ borderRadius: 999 }}
+            >
+              Anterior
+            </button>
+
+            {Array.from({ length: totalPages }).map((_, index) => {
+              const pageNumber = index + 1;
+
+              return (
+                <button
+                  type="button"
+                  key={pageNumber}
+                  className="btn btn-sm"
+                  onClick={() => setPage(pageNumber)}
+                  style={{
+                    borderRadius: 999,
+                    minWidth: 38,
+                    background:
+                      pageNumber === page ? theme.brown : "transparent",
+                    color: pageNumber === page ? "#fff" : theme.brown,
+                    border: `1px solid ${theme.brown}`,
+                    fontWeight: 700,
+                  }}
+                >
+                  {pageNumber}
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              disabled={page === totalPages}
+              onClick={() =>
+                setPage((prev) => Math.min(totalPages, prev + 1))
+              }
+              style={{ borderRadius: 999 }}
+            >
+              Próximo
+            </button>
+          </div>
+        )}
       </section>
 
       {modal && (

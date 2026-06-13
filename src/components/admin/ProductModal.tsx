@@ -21,15 +21,13 @@ type ProductForm = Omit<Product, "id"> & {
 const CROP_PREVIEW_SIZE = 520;
 const OUTPUT_SIZE = 1200;
 
+const DEFAULT_BRAND = "Sem Marca";
+const DEFAULT_CONDITION = "Semi novo";
+const DEFAULT_SHIPPING_PROFILE: ShippingProfile = "leve";
+
 const shippingProfiles: Record<
   ShippingProfile,
-  {
-    label: string;
-    weight: number;
-    height: number;
-    width: number;
-    length: number;
-  }
+  { label: string; weight: number; height: number; width: number; length: number }
 > = {
   leve: {
     label: "Leve - body, blusa, short, saia",
@@ -65,15 +63,15 @@ const emptyForm: ProductForm = {
   age: "",
   color: "",
   gender: "",
-  brand: "",
-  condition: "",
+  brand: DEFAULT_BRAND,
+  condition: DEFAULT_CONDITION,
   measurements: "",
   stock: 1,
-  shippingProfile: "",
-  weight: 0.15,
-  height: 4,
-  width: 10,
-  length: 15,
+  shippingProfile: DEFAULT_SHIPPING_PROFILE,
+  weight: shippingProfiles.leve.weight,
+  height: shippingProfiles.leve.height,
+  width: shippingProfiles.leve.width,
+  length: shippingProfiles.leve.length,
   images: [],
   status: "disponivel",
   reservedUntil: null,
@@ -90,8 +88,7 @@ const optionFields: {
   { key: "category", label: "Categoria", type: "categorias" },
   { key: "type", label: "Tipo", type: "tipos" },
   { key: "subtype", label: "Subtipo", type: "subtipos" },
-  { key: "size", label: "Tamanho", type: "tamanhos" },
-  { key: "age", label: "Idade", type: "idades" },
+{ key: "size", label: "Tamanho / Idade", type: "tamanhos" },
   { key: "color", label: "Cor", type: "cores" },
   { key: "gender", label: "Sexo", type: "sexos" },
   { key: "brand", label: "Marca", type: "marcas" },
@@ -103,18 +100,25 @@ function uniqueNames(names: string[]) {
 
   names.forEach((name) => {
     const cleanName = String(name || "").trim();
-
     const key = cleanName
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
 
-    if (cleanName && !map.has(key)) {
-      map.set(key, cleanName);
-    }
+    if (cleanName && !map.has(key)) map.set(key, cleanName);
   });
 
   return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+}
+
+function ensureOption(options: string[], value: string) {
+  const exists = options.some(
+    (item) =>
+      item.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() ===
+      value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim(),
+  );
+
+  return exists ? options : [value, ...options];
 }
 
 function createInitialCrop(): Crop {
@@ -145,30 +149,36 @@ export default function ProductModal({
           ...currentProduct,
           type: currentProduct.type || "",
           subtype: currentProduct.subtype || "",
-          shippingProfile: currentProduct.shippingProfile || "",
-          weight: Number(currentProduct.weight || 0.15),
-          height: Number(currentProduct.height || 4),
-          width: Number(currentProduct.width || 10),
-          length: Number(currentProduct.length || 15),
+          age: "",
+          shippingProfile:
+            currentProduct.shippingProfile || DEFAULT_SHIPPING_PROFILE,
+          brand: currentProduct.brand || DEFAULT_BRAND,
+          condition: currentProduct.condition || DEFAULT_CONDITION,
+          weight: Number(currentProduct.weight || shippingProfiles.leve.weight),
+          height: Number(currentProduct.height || shippingProfiles.leve.height),
+          width: Number(currentProduct.width || shippingProfiles.leve.width),
+          length: Number(currentProduct.length || shippingProfiles.leve.length),
           images: currentProduct.images || [],
           updatedAt: Date.now(),
         }
-      : emptyForm,
+      : {
+          ...emptyForm,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
   );
 
   const [options, setOptions] = useState<Record<string, string[]>>({
     categorias: [],
     tamanhos: [],
-    idades: [],
     cores: [],
     sexos: [],
-    condicoes: [],
-    marcas: [],
+    condicoes: [DEFAULT_CONDITION],
+    marcas: [DEFAULT_BRAND],
   });
 
   const [typeDocs, setTypeDocs] = useState<OptionDoc[]>([]);
   const [subtypeDocs, setSubtypeDocs] = useState<OptionDoc[]>([]);
-
   const [manager, setManager] = useState<{
     type: ExtendedOptionType;
     title: string;
@@ -177,7 +187,6 @@ export default function ProductModal({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cropSrc, setCropSrc] = useState("");
-
   const [crop, setCrop] = useState<Crop>(createInitialCrop());
   const [completedCrop, setCompletedCrop] = useState<PixelCrop | null>(null);
 
@@ -208,11 +217,21 @@ export default function ProductModal({
   async function loadOptions() {
     const loaded: Record<string, string[]> = {};
 
-    for (const field of optionFields) {
-      if (field.type !== "tipos" && field.type !== "subtipos") {
-        loaded[field.type] = await getOptions(field.type as OptionType);
-      }
+    const optionTypes: OptionType[] = [
+      "categorias",
+      "tamanhos",
+      "cores",
+      "sexos",
+      "condicoes",
+      "marcas",
+    ];
+
+    for (const optionType of optionTypes) {
+      loaded[optionType] = await getOptions(optionType);
     }
+
+    loaded.marcas = ensureOption(loaded.marcas || [], DEFAULT_BRAND);
+    loaded.condicoes = ensureOption(loaded.condicoes || [], DEFAULT_CONDITION);
 
     const [loadedTypes, loadedSubtypes] = await Promise.all([
       getOptionDocs("tipos"),
@@ -274,12 +293,7 @@ export default function ProductModal({
       const cropToUse =
         completedCrop?.width && completedCrop?.height
           ? completedCrop
-          : {
-              x: 0,
-              y: 0,
-              width: image.width,
-              height: image.height,
-            };
+          : { x: 0, y: 0, width: image.width, height: image.height };
 
       const scaleX = image.naturalWidth / image.width;
       const scaleY = image.naturalHeight / image.height;
@@ -339,20 +353,7 @@ export default function ProductModal({
   }
 
   function handleShippingProfile(value: string) {
-    if (!value) {
-      setForm({
-        ...form,
-        shippingProfile: "",
-        weight: 0.15,
-        height: 4,
-        width: 10,
-        length: 15,
-      });
-
-      return;
-    }
-
-    const key = value as ShippingProfile;
+    const key = (value || DEFAULT_SHIPPING_PROFILE) as ShippingProfile;
     const profile = shippingProfiles[key];
 
     setForm({
@@ -368,26 +369,18 @@ export default function ProductModal({
   function getSelectOptions(fieldType: ExtendedOptionType) {
     if (fieldType === "tipos") return availableTypes;
     if (fieldType === "subtipos") return availableSubtypes;
-
     return options[fieldType] || [];
   }
 
   function getPlaceholder(fieldType: ExtendedOptionType) {
-    if (fieldType === "tipos" && !form.category) {
-      return "Selecione a categoria primeiro";
-    }
-
-    if (fieldType === "subtipos" && !form.type) {
-      return "Selecione o tipo primeiro";
-    }
-
+    if (fieldType === "tipos" && !form.category) return "Selecione a categoria primeiro";
+    if (fieldType === "subtipos" && !form.type) return "Selecione o tipo primeiro";
     return "Selecione";
   }
 
   function selectIsDisabled(fieldType: ExtendedOptionType) {
     if (fieldType === "tipos") return !form.category;
     if (fieldType === "subtipos") return !form.type;
-
     return false;
   }
 
@@ -444,11 +437,6 @@ export default function ProductModal({
       return;
     }
 
-    if (!form.shippingProfile) {
-      alert("Selecione o perfil de frete.");
-      return;
-    }
-
     setSaving(true);
 
     try {
@@ -465,14 +453,17 @@ export default function ProductModal({
       await saveProduct(
         {
           ...form,
+          age: "",
           images: finalImages,
           price: Number(form.price || 0),
           stock: Number(form.stock || 1),
-          weight: Number(form.weight || 0.15),
-          height: Number(form.height || 4),
-          width: Number(form.width || 10),
-          length: Number(form.length || 15),
-          shippingProfile: form.shippingProfile || "",
+          brand: form.brand || DEFAULT_BRAND,
+          condition: form.condition || DEFAULT_CONDITION,
+          weight: Number(form.weight || shippingProfiles.leve.weight),
+          height: Number(form.height || shippingProfiles.leve.height),
+          width: Number(form.width || shippingProfiles.leve.width),
+          length: Number(form.length || shippingProfiles.leve.length),
+          shippingProfile: form.shippingProfile || DEFAULT_SHIPPING_PROFILE,
           createdAt: form.createdAt || Date.now(),
           updatedAt: Date.now(),
         },
@@ -487,6 +478,53 @@ export default function ProductModal({
     } finally {
       setSaving(false);
     }
+  }
+
+  function renderSelectField(field: {
+    key: keyof ProductForm;
+    label: string;
+    type: ExtendedOptionType;
+  }) {
+    const selectOptions = getSelectOptions(field.type);
+
+    return (
+      <div className="col-md-4" key={String(field.key)}>
+        <label className="form-label">{field.label}</label>
+
+        <div className="input-group">
+          <select
+            className="form-select"
+            value={String(form[field.key] || "")}
+            disabled={selectIsDisabled(field.type)}
+            onChange={(e) => handleOptionChange(field.key, e.target.value)}
+          >
+            <option value="">{getPlaceholder(field.type)}</option>
+
+            {selectOptions.map((op, index) => (
+              <option key={`${field.type}-${op}-${index}`} value={op}>
+                {op}
+              </option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            className="btn btn-outline-secondary"
+            title={`Cadastrar ${field.label}`}
+            aria-label={`Cadastrar ${field.label}`}
+            onClick={() => openManager(field)}
+            style={{
+              width: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Plus size={18} />
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -569,61 +607,16 @@ export default function ProductModal({
               />
             </div>
 
-            {optionFields.map((field) => {
-              const selectOptions = getSelectOptions(field.type);
-
-              return (
-                <div className="col-md-4" key={String(field.key)}>
-                  <label className="form-label">{field.label}</label>
-
-                  <div className="input-group">
-                    <select
-                      className="form-select"
-                      value={String(form[field.key] || "")}
-                      disabled={selectIsDisabled(field.type)}
-                      onChange={(e) =>
-                        handleOptionChange(field.key, e.target.value)
-                      }
-                    >
-                      <option value="">{getPlaceholder(field.type)}</option>
-
-                      {selectOptions.map((op, index) => (
-                        <option key={`${field.type}-${op}-${index}`} value={op}>
-                          {op}
-                        </option>
-                      ))}
-                    </select>
-
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary"
-                      title={`Cadastrar ${field.label}`}
-                      aria-label={`Cadastrar ${field.label}`}
-                      onClick={() => openManager(field)}
-                      style={{
-                        width: 44,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Plus size={18} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+            {optionFields.map((field) => renderSelectField(field))}
 
             <div className="col-md-4">
               <label className="form-label">Perfil de frete</label>
 
               <select
                 className="form-select"
-                value={form.shippingProfile || ""}
+                value={form.shippingProfile || DEFAULT_SHIPPING_PROFILE}
                 onChange={(e) => handleShippingProfile(e.target.value)}
               >
-                <option value="">Selecione</option>
-
                 {Object.entries(shippingProfiles).map(([key, profile]) => (
                   <option key={key} value={key}>
                     {profile.label}
@@ -781,9 +774,7 @@ export default function ProductModal({
                   <p className="fw-bold mb-1">Editar nova imagem</p>
 
                   <small style={{ color: theme.brownSoft }}>
-                    Arraste as bordas para cortar livremente. Pode selecionar a
-                    imagem toda ou apenas a parte desejada. Depois ela será
-                    encaixada no card sem cortar.
+                    Arraste as bordas para cortar livremente.
                   </small>
 
                   <div
@@ -807,9 +798,7 @@ export default function ProductModal({
                         ref={imageRef}
                         src={cropSrc}
                         alt="Cortar"
-                        onLoad={() => {
-                          setCrop(createInitialCrop());
-                        }}
+                        onLoad={() => setCrop(createInitialCrop())}
                         style={{
                           width: "100%",
                           height: "auto",

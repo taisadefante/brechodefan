@@ -11,7 +11,6 @@ export type ProductFilters = {
   type?: string;
   subtype?: string;
   size?: string;
-  age?: string;
   color?: string;
   gender?: string;
   brand?: string;
@@ -33,6 +32,19 @@ function uniqueValues(products: Product[], key: keyof Product) {
     new Set(
       products
         .map((product) => String(product[key] || "").trim())
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function uniqueSizeAgeValues(products: Product[]) {
+  return Array.from(
+    new Set(
+      products
+        .flatMap((product) => [
+          String(product.size || "").trim(),
+          String(product.age || "").trim(),
+        ])
         .filter(Boolean),
     ),
   ).sort((a, b) => a.localeCompare(b));
@@ -89,8 +101,12 @@ export function productMatchesFilters(
   const categoryOk = !filters.category || product.category === filters.category;
   const typeOk = !filters.type || product.type === filters.type;
   const subtypeOk = !filters.subtype || product.subtype === filters.subtype;
-  const sizeOk = !filters.size || product.size === filters.size;
-  const ageOk = !filters.age || product.age === filters.age;
+
+  const sizeOk =
+    !filters.size ||
+    product.size === filters.size ||
+    product.age === filters.size;
+
   const colorOk = !filters.color || product.color === filters.color;
   const genderOk = !filters.gender || product.gender === filters.gender;
   const brandOk = !filters.brand || product.brand === filters.brand;
@@ -98,8 +114,10 @@ export function productMatchesFilters(
     !filters.condition || product.condition === filters.condition;
 
   const price = Number(product.price || 0);
+
   const minPriceOk =
     !filters.minPrice || price >= Number(filters.minPrice || 0);
+
   const maxPriceOk =
     !filters.maxPrice || price <= Number(filters.maxPrice || 0);
 
@@ -109,7 +127,6 @@ export function productMatchesFilters(
     typeOk &&
     subtypeOk &&
     sizeOk &&
-    ageOk &&
     colorOk &&
     genderOk &&
     brandOk &&
@@ -171,13 +188,8 @@ export default function FilterBar({
     },
     {
       key: "size",
-      label: "Tamanho",
-      options: uniqueValues(products, "size"),
-    },
-    {
-      key: "age",
-      label: "Idade",
-      options: uniqueValues(products, "age"),
+      label: "Tamanho / Idade",
+      options: uniqueSizeAgeValues(products),
     },
     {
       key: "color",

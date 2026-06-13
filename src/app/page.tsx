@@ -50,10 +50,10 @@ function HomeContent() {
   }, [search, filters]);
 
   const filtered = useMemo(() => {
-    return products.filter((p) => {
-      if (!isProductAvailable(p)) return false;
+    return products.filter((product) => {
+      if (!isProductAvailable(product)) return false;
 
-      return productMatchesFilters(p, search, filters);
+      return productMatchesFilters(product, search, filters);
     });
   }, [products, search, filters]);
 
@@ -274,8 +274,8 @@ function HomeContent() {
           <h2 className="fw-bold">Escolha sua próxima peça</h2>
 
           <p style={{ color: theme.brownSoft, maxWidth: 760 }}>
-            Use os filtros para encontrar produtos por categoria, marca,
-            tipo, subtipo, marca, tamanho, sexo, idade, condição, preço e cor.
+            Use os filtros para encontrar produtos por categoria, tipo, subtipo,
+            marca, tamanho/idade, sexo, condição, preço e cor.
           </p>
         </div>
 
@@ -299,8 +299,8 @@ function HomeContent() {
 
         <div className="row g-4">
           {paginatedProducts.map((product) => (
-<div className="col-12 col-md-6 col-xl-4" key={product.id}>
-                <ProductCard
+            <div className="col-12 col-md-6 col-xl-4" key={product.id}>
+              <ProductCard
                 product={product}
                 onView={() => setSelectedProduct(product)}
               />

@@ -33,12 +33,13 @@ export default function ProductQuickViewModal({
   const [index, setIndex] = useState(0);
   const currentImage = images[index];
 
+  const sizeAge = product.size || product.age || "";
+
   const details = [
     hasValue(product.category) && ["Categoria", product.category],
     hasValue(product.type) && ["Tipo", product.type],
     hasValue(product.subtype) && ["Subtipo", product.subtype],
-    hasValue(product.size) && ["Tamanho", product.size],
-    hasValue(product.age) && ["Idade", product.age],
+    hasValue(sizeAge) && ["Tamanho / Idade", sizeAge],
     hasValue(product.gender) && ["Sexo", product.gender],
     hasValue(product.brand) && ["Marca", product.brand],
     hasValue(product.condition) && ["Estado", product.condition],
