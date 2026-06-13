@@ -24,6 +24,7 @@ import { Product, Sale } from "@/types";
 import { formatMoney } from "@/lib/utils";
 import { theme } from "@/lib/theme";
 import ProductModal from "@/components/admin/ProductModal";
+import FilterBar, { productMatchesFilters } from "@/components/FilterBar";
 
 const ADMIN_EMAIL = "taisadefante@hotmail.com";
 
@@ -53,6 +54,9 @@ function AdminProdutosContent() {
   const [updatingProductId, setUpdatingProductId] = useState<string | null>(
     null,
   );
+
+  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState<Record<string, string>>({});
 
   const [email, setEmail] = useState(ADMIN_EMAIL);
   const [password, setPassword] = useState("");
@@ -153,6 +157,12 @@ function AdminProdutosContent() {
     setEditingProduct(product);
     setModal(true);
   }
+
+  const filteredProducts = useMemo(() => {
+    return products.filter((product) =>
+      productMatchesFilters(product, search, filters),
+    );
+  }, [products, search, filters]);
 
   const stats = useMemo(() => {
     const month = new Date().getMonth();
@@ -361,6 +371,14 @@ function AdminProdutosContent() {
         ))}
       </div>
 
+      <FilterBar
+        products={products}
+        search={search}
+        setSearch={setSearch}
+        filters={filters}
+        setFilters={setFilters}
+      />
+
       <section
         style={{
           background: theme.ivory2,
@@ -384,7 +402,10 @@ function AdminProdutosContent() {
               <tr>
                 <th>Produto</th>
                 <th>Categoria</th>
+                <th>Tipo</th>
+                <th>Subtipo</th>
                 <th>Tamanho</th>
+                <th>Sexo</th>
                 <th>Preço</th>
                 <th>Estoque</th>
                 <th>Status</th>
@@ -393,7 +414,7 @@ function AdminProdutosContent() {
             </thead>
 
             <tbody>
-              {products.map((product) => {
+              {filteredProducts.map((product) => {
                 const isUpdating = updatingProductId === product.id;
 
                 return (
@@ -450,7 +471,10 @@ function AdminProdutosContent() {
                     </td>
 
                     <td>{product.category || "Não informado"}</td>
+                    <td>{product.type || "Não informado"}</td>
+                    <td>{product.subtype || "Não informado"}</td>
                     <td>{product.size || "Não informado"}</td>
+                    <td>{product.gender || "Não informado"}</td>
 
                     <td>
                       <strong>{formatMoney(product.price)}</strong>
@@ -529,10 +553,10 @@ function AdminProdutosContent() {
                 );
               })}
 
-              {!products.length && (
+              {!filteredProducts.length && (
                 <tr>
-                  <td colSpan={7} className="text-center py-4">
-                    Nenhum produto cadastrado ainda.
+                  <td colSpan={10} className="text-center py-4">
+                    Nenhum produto encontrado com esses filtros.
                   </td>
                 </tr>
               )}

@@ -1,19 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Plus } from "lucide-react";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import ReactCrop, { type Crop, type PixelCrop } from "react-image-crop";
 import "react-image-crop/dist/ReactCrop.css";
 
-import { getOptions, saveProduct } from "@/lib/firestore";
+import { getOptionDocs, getOptions, saveProduct } from "@/lib/firestore";
 import { storage } from "@/lib/firebase";
-import { OptionType, Product, ShippingProfile } from "@/types";
+import { OptionDoc, OptionType, Product, ShippingProfile } from "@/types";
 import { theme } from "@/lib/theme";
-import OptionManagerModal from "./OptionManagerModal";
+import OptionManagerModal, { ExtendedOptionType } from "./OptionManagerModal";
 
 type ProductForm = Omit<Product, "id"> & {
   shippingProfile?: ShippingProfile | "";
+  type?: string;
+  subtype?: string;
 };
 
 const CARD_IMAGE_WIDTH = 390;
@@ -57,6 +59,8 @@ const emptyForm: ProductForm = {
   description: "",
   price: 0,
   category: "",
+  type: "",
+  subtype: "",
   size: "",
   age: "",
   color: "",
@@ -81,9 +85,11 @@ const emptyForm: ProductForm = {
 const optionFields: {
   key: keyof ProductForm;
   label: string;
-  type: OptionType;
+  type: ExtendedOptionType;
 }[] = [
   { key: "category", label: "Categoria", type: "categorias" },
+  { key: "type", label: "Tipo", type: "tipos" },
+  { key: "subtype", label: "Subtipo", type: "subtipos" },
   { key: "size", label: "Tamanho", type: "tamanhos" },
   { key: "age", label: "Idade", type: "idades" },
   { key: "color", label: "Cor", type: "cores" },
@@ -91,6 +97,24 @@ const optionFields: {
   { key: "brand", label: "Marca", type: "marcas" },
   { key: "condition", label: "Estado da peça", type: "condicoes" },
 ];
+
+function uniqueNames(names: string[]) {
+  const map = new Map<string, string>();
+
+  names.forEach((name) => {
+    const cleanName = String(name || "").trim();
+    const key = cleanName
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    if (cleanName && !map.has(key)) {
+      map.set(key, cleanName);
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+}
 
 export default function ProductModal({
   product,
@@ -101,17 +125,21 @@ export default function ProductModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const currentProduct = product || null;
+
   const [form, setForm] = useState<ProductForm>(
-    product
+    currentProduct
       ? {
           ...emptyForm,
-          ...product,
-          shippingProfile: product.shippingProfile || "",
-          weight: Number(product.weight || 0.15),
-          height: Number(product.height || 4),
-          width: Number(product.width || 10),
-          length: Number(product.length || 15),
-          images: product.images || [],
+          ...currentProduct,
+          type: currentProduct.type || "",
+          subtype: currentProduct.subtype || "",
+          shippingProfile: currentProduct.shippingProfile || "",
+          weight: Number(currentProduct.weight || 0.15),
+          height: Number(currentProduct.height || 4),
+          width: Number(currentProduct.width || 10),
+          length: Number(currentProduct.length || 15),
+          images: currentProduct.images || [],
           updatedAt: Date.now(),
         }
       : emptyForm,
@@ -127,8 +155,11 @@ export default function ProductModal({
     marcas: [],
   });
 
+  const [typeDocs, setTypeDocs] = useState<OptionDoc[]>([]);
+  const [subtypeDocs, setSubtypeDocs] = useState<OptionDoc[]>([]);
+
   const [manager, setManager] = useState<{
-    type: OptionType;
+    type: ExtendedOptionType;
     title: string;
   } | null>(null);
 
@@ -149,14 +180,43 @@ export default function ProductModal({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
+  const availableTypes = useMemo(() => {
+    if (!form.category) return [];
+
+    return uniqueNames(
+      typeDocs
+        .filter((item) => item.parentCategory === form.category)
+        .map((item) => item.name),
+    );
+  }, [typeDocs, form.category]);
+
+  const availableSubtypes = useMemo(() => {
+    if (!form.type) return [];
+
+    return uniqueNames(
+      subtypeDocs
+        .filter((item) => item.parentType === form.type)
+        .map((item) => item.name),
+    );
+  }, [subtypeDocs, form.type]);
+
   async function loadOptions() {
     const loaded: Record<string, string[]> = {};
 
     for (const field of optionFields) {
-      loaded[field.type] = await getOptions(field.type);
+      if (field.type !== "tipos" && field.type !== "subtipos") {
+        loaded[field.type] = await getOptions(field.type as OptionType);
+      }
     }
 
+    const [loadedTypes, loadedSubtypes] = await Promise.all([
+      getOptionDocs("tipos"),
+      getOptionDocs("subtipos"),
+    ]);
+
     setOptions(loaded);
+    setTypeDocs(loadedTypes);
+    setSubtypeDocs(loadedSubtypes);
   }
 
   useEffect(() => {
@@ -215,8 +275,6 @@ export default function ProductModal({
 
       canvas.width = 1200;
       canvas.height = 1600;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const cropToUse =
         completedCrop?.width && completedCrop?.height
@@ -307,6 +365,62 @@ export default function ProductModal({
     });
   }
 
+  function getSelectOptions(fieldType: ExtendedOptionType) {
+    if (fieldType === "tipos") return availableTypes;
+    if (fieldType === "subtipos") return availableSubtypes;
+    return options[fieldType] || [];
+  }
+
+  function getPlaceholder(fieldType: ExtendedOptionType) {
+    if (fieldType === "tipos" && !form.category) {
+      return "Selecione a categoria primeiro";
+    }
+
+    if (fieldType === "subtipos" && !form.type) {
+      return "Selecione o tipo primeiro";
+    }
+
+    return "Selecione";
+  }
+
+  function selectIsDisabled(fieldType: ExtendedOptionType) {
+    if (fieldType === "tipos") return !form.category;
+    if (fieldType === "subtipos") return !form.type;
+    return false;
+  }
+
+  function handleOptionChange(key: keyof ProductForm, value: string) {
+    if (key === "category") {
+      setForm({ ...form, category: value, type: "", subtype: "" });
+      return;
+    }
+
+    if (key === "type") {
+      setForm({ ...form, type: value, subtype: "" });
+      return;
+    }
+
+    setForm({ ...form, [key]: value });
+  }
+
+  function openManager(field: {
+    key: keyof ProductForm;
+    label: string;
+    type: ExtendedOptionType;
+  }) {
+    if (field.type === "tipos" && !form.category) {
+      alert("Selecione uma categoria antes de cadastrar o tipo.");
+      return;
+    }
+
+    if (field.type === "subtipos" && !form.type) {
+      alert("Selecione um tipo antes de cadastrar subtipo.");
+      return;
+    }
+
+    setManager({ type: field.type, title: field.label });
+  }
+
   async function save() {
     if (!form.name.trim()) {
       alert("Informe o nome do produto.");
@@ -320,6 +434,11 @@ export default function ProductModal({
 
     if (!form.category) {
       alert("Selecione a categoria.");
+      return;
+    }
+
+    if (!form.type) {
+      alert("Selecione o tipo do produto.");
       return;
     }
 
@@ -355,11 +474,14 @@ export default function ProductModal({
           createdAt: form.createdAt || Date.now(),
           updatedAt: Date.now(),
         },
-        product?.id,
+        currentProduct?.id,
       );
 
       onSaved();
       onClose();
+    } catch (error) {
+      console.error("Erro ao salvar produto:", error);
+      alert("Erro ao salvar produto.");
     } finally {
       setSaving(false);
     }
@@ -387,11 +509,11 @@ export default function ProductModal({
           <div className="d-flex justify-content-between align-items-center mb-4 gap-3">
             <div>
               <h3 className="fw-bold mb-1">
-                {product ? "Editar produto" : "Cadastrar produto"}
+                {currentProduct ? "Editar produto" : "Cadastrar produto"}
               </h3>
 
               <p className="mb-0" style={{ color: theme.brownSoft }}>
-                Cadastre as informações da peça e selecione o perfil de frete.
+                Cadastre categoria, tipo, subtipo e informações completas da peça.
               </p>
             </div>
 
@@ -442,47 +564,50 @@ export default function ProductModal({
               />
             </div>
 
-            {optionFields.map((field) => (
-              <div className="col-md-4" key={field.key}>
-                <label className="form-label">{field.label}</label>
+            {optionFields.map((field) => {
+              const selectOptions = getSelectOptions(field.type);
 
-                <div className="input-group">
-                  <select
-                    className="form-select"
-                    value={String(form[field.key] || "")}
-                    onChange={(e) =>
-                      setForm({ ...form, [field.key]: e.target.value })
-                    }
-                  >
-                    <option value="">Selecione</option>
+              return (
+                <div className="col-md-4" key={String(field.key)}>
+                  <label className="form-label">{field.label}</label>
 
-                    {options[field.type]?.map((op) => (
-                      <option key={op} value={op}>
-                        {op}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="input-group">
+                    <select
+                      className="form-select"
+                      value={String(form[field.key] || "")}
+                      disabled={selectIsDisabled(field.type)}
+                      onChange={(e) =>
+                        handleOptionChange(field.key, e.target.value)
+                      }
+                    >
+                      <option value="">{getPlaceholder(field.type)}</option>
 
-                  <button
-                    type="button"
-                    className="btn btn-outline-secondary"
-                    title={`Cadastrar ${field.label}`}
-                    aria-label={`Cadastrar ${field.label}`}
-                    onClick={() =>
-                      setManager({ type: field.type, title: field.label })
-                    }
-                    style={{
-                      width: 44,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Plus size={18} />
-                  </button>
+                      {selectOptions.map((op, index) => (
+                        <option key={`${field.type}-${op}-${index}`} value={op}>
+                          {op}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      title={`Cadastrar ${field.label}`}
+                      aria-label={`Cadastrar ${field.label}`}
+                      onClick={() => openManager(field)}
+                      style={{
+                        width: 44,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Plus size={18} />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             <div className="col-md-4">
               <label className="form-label">Perfil de frete</label>
@@ -500,11 +625,6 @@ export default function ProductModal({
                   </option>
                 ))}
               </select>
-
-              <small style={{ color: theme.brownSoft }}>
-                Para roupa infantil, a caixa base é 4cm x 10cm x 15cm. No
-                carrinho, a API aumenta a caixa conforme a quantidade de peças.
-              </small>
             </div>
 
             <div className="col-md-4">
@@ -543,67 +663,12 @@ export default function ProductModal({
               <label className="form-label">Medidas da peça</label>
               <input
                 className="form-control"
-                placeholder="Ex: 0 a 3 meses, veste P, comprimento 30cm..."
+                placeholder="Ex: comprimento, largura, busto, cintura..."
                 value={form.measurements || ""}
                 onChange={(e) =>
                   setForm({ ...form, measurements: e.target.value })
                 }
               />
-            </div>
-
-            <div className="col-12 mt-3">
-              <div
-                className="p-3"
-                style={{
-                  background: "#fff",
-                  borderRadius: 18,
-                  border: `1px solid ${theme.border}`,
-                }}
-              >
-                <h5 className="fw-bold mb-1">Frete automático</h5>
-                <p className="mb-3" style={{ color: theme.brownSoft }}>
-                  O cadastro salva o peso da peça. A caixa é calculada
-                  automaticamente no carrinho conforme a quantidade de peças.
-                </p>
-
-                <div className="row g-3">
-                  <div className="col-md-3">
-                    <label className="form-label">Peso (kg)</label>
-                    <input
-                      className="form-control"
-                      value={form.weight}
-                      readOnly
-                    />
-                  </div>
-
-                  <div className="col-md-3">
-                    <label className="form-label">Altura (cm)</label>
-                    <input
-                      className="form-control"
-                      value={form.height}
-                      readOnly
-                    />
-                  </div>
-
-                  <div className="col-md-3">
-                    <label className="form-label">Largura (cm)</label>
-                    <input
-                      className="form-control"
-                      value={form.width}
-                      readOnly
-                    />
-                  </div>
-
-                  <div className="col-md-3">
-                    <label className="form-label">Comprimento (cm)</label>
-                    <input
-                      className="form-control"
-                      value={form.length}
-                      readOnly
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
 
             <div className="col-12">
@@ -684,9 +749,6 @@ export default function ProductModal({
                         height: 28,
                         borderRadius: "50%",
                         padding: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
                       }}
                       disabled={uploading || saving}
                       onClick={() =>
@@ -705,31 +767,19 @@ export default function ProductModal({
               {cropSrc && (
                 <div
                   className="mt-4 p-3"
-                  style={{
-                    background: "#fff",
-                    borderRadius: 18,
-                  }}
+                  style={{ background: "#fff", borderRadius: 18 }}
                 >
                   <p className="fw-bold mb-1">Editar nova imagem</p>
 
-                  <p className="small mb-3" style={{ color: "#6b7280" }}>
-                    A área abaixo tem o mesmo formato da foto no card. Ajuste o
-                    corte e o tamanho para ver como vai ficar.
-                  </p>
-
-                  <div className="mb-3">
-                    <label className="form-label">Tamanho da foto</label>
-
-                    <input
-                      type="range"
-                      min="0.5"
-                      max="2.5"
-                      step="0.05"
-                      value={imageScale}
-                      className="form-range"
-                      onChange={(e) => setImageScale(Number(e.target.value))}
-                    />
-                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.5"
+                    step="0.05"
+                    value={imageScale}
+                    className="form-range"
+                    onChange={(e) => setImageScale(Number(e.target.value))}
+                  />
 
                   <div
                     style={{
@@ -739,9 +789,6 @@ export default function ProductModal({
                       background: "#f3eadf",
                       borderRadius: 18,
                       overflow: "hidden",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
                     }}
                   >
                     <ReactCrop
@@ -753,22 +800,12 @@ export default function ProductModal({
                         ref={imageRef}
                         src={cropSrc}
                         alt="Cortar"
-                        onLoad={() =>
-                          setCrop({
-                            unit: "%",
-                            x: 0,
-                            y: 0,
-                            width: 100,
-                            height: 100,
-                          })
-                        }
                         style={{
                           width: CARD_IMAGE_WIDTH,
                           height: CARD_IMAGE_HEIGHT,
                           objectFit: "contain",
                           transform: `scale(${imageScale})`,
                           transformOrigin: "center center",
-                          display: "block",
                         }}
                       />
                     </ReactCrop>
@@ -828,6 +865,8 @@ export default function ProductModal({
         <OptionManagerModal
           type={manager.type}
           title={manager.title}
+          parentCategory={manager.type === "tipos" || manager.type === "subtipos" ? form.category || "" : ""}
+          parentType={manager.type === "subtipos" ? form.type || "" : ""}
           onClose={() => setManager(null)}
           onChange={loadOptions}
         />

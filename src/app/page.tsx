@@ -16,7 +16,7 @@ import { getProducts } from "@/lib/firestore";
 import { Product } from "@/types";
 import ProductCard from "@/components/ProductCard";
 import ProductQuickViewModal from "@/components/ProductQuickViewModal";
-import FilterBar from "@/components/FilterBar";
+import FilterBar, { productMatchesFilters } from "@/components/FilterBar";
 import { normalizeText } from "@/lib/utils";
 import { theme } from "@/lib/theme";
 
@@ -53,18 +53,7 @@ function HomeContent() {
     return products.filter((p) => {
       if (!isProductAvailable(p)) return false;
 
-      const text = normalizeText(
-        `${p.name} ${p.description} ${p.category} ${p.color} ${p.size} ${p.age} ${p.gender} ${p.brand}`,
-      );
-
-      const okSearch = !search || text.includes(normalizeText(search));
-
-      const okFilters = Object.entries(filters).every(([key, value]) => {
-        if (!value) return true;
-        return String(p[key as keyof Product] || "") === value;
-      });
-
-      return okSearch && okFilters;
+      return productMatchesFilters(p, search, filters);
     });
   }, [products, search, filters]);
 
@@ -286,7 +275,7 @@ function HomeContent() {
 
           <p style={{ color: theme.brownSoft, maxWidth: 760 }}>
             Use os filtros para encontrar produtos por categoria, marca,
-            tamanho, sexo, idade e cor.
+            tipo, subtipo, marca, tamanho, sexo, idade, condição, preço e cor.
           </p>
         </div>
 

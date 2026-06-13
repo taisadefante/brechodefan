@@ -20,6 +20,7 @@ import {
   CustomerAddress,
   CustomerData,
   DeliveryType,
+  OptionDoc,
   OptionType,
   Product,
   Sale,
@@ -46,6 +47,60 @@ function saleUsesStock(status: SaleStatus) {
 
 function getItemQuantity(item: CartItem) {
   return Math.max(Number(item.quantity || 1), 1);
+}
+
+function normalizeOptionName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeCompare(value?: string) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function optionFromDoc(id: string, data: Record<string, unknown>): OptionDoc {
+  return {
+    id,
+    name: String(data.name || ""),
+    parentCategory: String(data.parentCategory || ""),
+    parentType: String(data.parentType || ""),
+  };
+}
+
+function uniqueOptionDocs(items: OptionDoc[]) {
+  const map = new Map<string, OptionDoc>();
+
+  items.forEach((item) => {
+    const key = [
+      normalizeCompare(item.name),
+      normalizeCompare(item.parentCategory),
+      normalizeCompare(item.parentType),
+    ].join("|");
+
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function uniqueOptionNames(items: OptionDoc[]) {
+  const map = new Map<string, string>();
+
+  items.forEach((item) => {
+    const name = normalizeOptionName(item.name);
+    const key = normalizeCompare(name);
+
+    if (name && !map.has(key)) {
+      map.set(key, name);
+    }
+  });
+
+  return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
 }
 
 async function reserveStockFromSale(sale: SaleWithInventory) {
@@ -173,6 +228,8 @@ export async function saveProduct(
   const payload = {
     ...product,
     stock,
+    type: product.type || "",
+    subtype: product.subtype || "",
     status:
       stock > 0 && product.status === "vendido"
         ? "disponivel"
@@ -235,34 +292,121 @@ export async function markProductSold(productId: string): Promise<void> {
   });
 }
 
-export async function getOptions(type: OptionType): Promise<string[]> {
-  const snap = await getDocs(
-    query(collection(db, "options", type, "items"), orderBy("name", "asc")),
-  );
-
-  return snap.docs.map((d) => String(d.data().name || ""));
+export async function getOptions(
+  type: OptionType,
+  parentValue = "",
+): Promise<string[]> {
+  const docs = await getOptionDocs(type, parentValue);
+  return uniqueOptionNames(docs);
 }
 
 export async function getOptionDocs(
   type: OptionType,
-): Promise<Array<{ id: string; name: string }>> {
+  parentValue = "",
+): Promise<OptionDoc[]> {
   const snap = await getDocs(
     query(collection(db, "options", type, "items"), orderBy("name", "asc")),
   );
 
-  return snap.docs.map((d) => ({
-    id: d.id,
-    name: String(d.data().name || ""),
-  }));
+  const docs = snap.docs
+    .map((d) => optionFromDoc(d.id, d.data()))
+    .filter((item) => item.name.trim());
+
+  const cleanParent = normalizeCompare(parentValue);
+
+  const filtered = docs.filter((item) => {
+    if (!cleanParent) return true;
+
+    if (type === "tipos") {
+      return normalizeCompare(item.parentCategory) === cleanParent;
+    }
+
+    if (type === "subtipos") {
+      return normalizeCompare(item.parentType) === cleanParent;
+    }
+
+    return true;
+  });
+
+  return uniqueOptionDocs(filtered);
 }
 
-export async function addOption(type: OptionType, name: string): Promise<void> {
-  const cleanName = name.trim();
+async function optionAlreadyExists(
+  type: OptionType,
+  name: string,
+  parentValue = "",
+  ignoreId = "",
+) {
+  const docs = await getOptionDocs(type);
+  const cleanName = normalizeCompare(name);
+  const cleanParent = normalizeCompare(parentValue);
+
+  return docs.some((item) => {
+    if (item.id === ignoreId) return false;
+    if (normalizeCompare(item.name) !== cleanName) return false;
+
+    if (type === "tipos") {
+      return normalizeCompare(item.parentCategory) === cleanParent;
+    }
+
+    if (type === "subtipos") {
+      return normalizeCompare(item.parentType) === cleanParent;
+    }
+
+    return true;
+  });
+}
+
+function buildOptionPayload(type: OptionType, name: string, parentValue = "") {
+  const payload: {
+    name: string;
+    parentCategory?: string;
+    parentType?: string;
+    updatedAt: number;
+    createdAt?: number;
+  } = {
+    name: normalizeOptionName(name),
+    updatedAt: Date.now(),
+  };
+
+  if (type === "tipos") {
+    payload.parentCategory = parentValue || "";
+    payload.parentType = "";
+  }
+
+  if (type === "subtipos") {
+    payload.parentType = parentValue || "";
+    payload.parentCategory = "";
+  }
+
+  return payload;
+}
+
+export async function addOption(
+  type: OptionType,
+  name: string,
+  parentValue = "",
+): Promise<void> {
+  const cleanName = normalizeOptionName(name);
 
   if (!cleanName) throw new Error("Informe um nome válido.");
 
+  if (type === "tipos" && !parentValue) {
+    throw new Error("Selecione a categoria vinculada ao tipo.");
+  }
+
+  if (type === "subtipos" && !parentValue) {
+    throw new Error("Selecione o tipo vinculado ao subtipo.");
+  }
+
+  const exists = await optionAlreadyExists(type, cleanName, parentValue);
+
+  if (exists) {
+    throw new Error("Esta opção já está cadastrada.");
+  }
+
   await addDoc(collection(db, "options", type, "items"), {
-    name: cleanName,
+    ...buildOptionPayload(type, cleanName, parentValue),
     createdAt: Date.now(),
   });
 }
@@ -271,13 +415,28 @@ export async function editOption(
   type: OptionType,
   id: string,
   name: string,
+  parentValue = "",
 ): Promise<void> {
-  const cleanName = name.trim();
+  const cleanName = normalizeOptionName(name);
 
   if (!cleanName) throw new Error("Informe um nome válido.");
 
+  if (type === "tipos" && !parentValue) {
+    throw new Error("Selecione a categoria vinculada ao tipo.");
+  }
+
+  if (type === "subtipos" && !parentValue) {
+    throw new Error("Selecione o tipo vinculado ao subtipo.");
+  }
+
+  const exists = await optionAlreadyExists(type, cleanName, parentValue, id);
+
+  if (exists) {
+    throw new Error("Esta opção já está cadastrada.");
+  }
+
   await updateDoc(doc(db, "options", type, "items", id), {
-    name: cleanName,
+    ...buildOptionPayload(type, cleanName, parentValue),
     updatedAt: Date.now(),
   });
 }

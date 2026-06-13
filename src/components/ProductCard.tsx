@@ -56,6 +56,8 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
 
   const details = [
     hasValue(product.category) && ["Categoria", product.category],
+    hasValue(product.type) && ["Tipo", product.type],
+    hasValue(product.subtype) && ["Subtipo", product.subtype],
     hasValue(product.size) && ["Tamanho", product.size],
     hasValue(product.age) && ["Idade", product.age],
     hasValue(product.gender) && ["Sexo", product.gender],
@@ -114,6 +116,7 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          overflow: "hidden",
         }}
       >
         {currentImage ? (
@@ -124,7 +127,8 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
               width: "100%",
               height: "100%",
               objectFit: "contain",
-              padding: 6,
+              padding: 10,
+              display: "block",
             }}
           />
         ) : (
@@ -174,7 +178,7 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
           <div className="d-flex flex-wrap gap-2 mb-3">
             {details.map(([label, value]) => (
               <span
-                key={label}
+                key={`${label}-${value}`}
                 style={{
                   fontSize: 12,
                   padding: "5px 9px",

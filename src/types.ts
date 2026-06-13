@@ -25,6 +25,8 @@ export type Product = {
   description: string;
   price: number;
   category: string;
+  type?: string;
+  subtype?: string;
   size: string;
   age: string;
   color: string;
@@ -48,12 +50,21 @@ export type Product = {
 
 export type OptionType =
   | "categorias"
+  | "tipos"
+  | "subtipos"
   | "tamanhos"
   | "idades"
   | "cores"
   | "sexos"
   | "condicoes"
   | "marcas";
+
+export type OptionDoc = {
+  id: string;
+  name: string;
+  parentCategory?: string;
+  parentType?: string;
+};
 
 export type CustomerData = {
   name: string;
