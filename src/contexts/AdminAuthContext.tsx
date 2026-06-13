@@ -3,14 +3,14 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
   User,
-  browserLocalPersistence,
+  browserSessionPersistence,
   onAuthStateChanged,
   setPersistence,
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
 
-import { adminAuth } from "@/lib/firebase-admin-auth";
+import { auth } from "@/lib/firebase";
 
 type AdminAuthContextType = {
   adminUser: User | null;
@@ -34,11 +34,19 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     !!adminUser?.email && adminUser.email.toLowerCase() === ADMIN_EMAIL;
 
   useEffect(() => {
-    setPersistence(adminAuth, browserLocalPersistence).catch((error) => {
-      console.error("Erro ao configurar persistência do admin:", error);
-    });
+    setPersistence(auth, browserSessionPersistence).catch(console.error);
 
-    const unsubscribe = onAuthStateChanged(adminAuth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (
+        currentUser?.email &&
+        currentUser.email.toLowerCase() !== ADMIN_EMAIL
+      ) {
+        signOut(auth).catch(() => null);
+        setAdminUser(null);
+        setLoadingAdmin(false);
+        return;
+      }
+
       setAdminUser(currentUser);
       setLoadingAdmin(false);
     });
@@ -53,16 +61,18 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       isAdmin,
 
       adminLogin: async (email, password) => {
-        await setPersistence(adminAuth, browserLocalPersistence);
-        await signInWithEmailAndPassword(
-          adminAuth,
-          email.trim().toLowerCase(),
-          password,
-        );
+        const cleanEmail = email.trim().toLowerCase();
+
+        if (cleanEmail !== ADMIN_EMAIL) {
+          throw new Error("Este e-mail não tem acesso ao painel administrativo.");
+        }
+
+        await setPersistence(auth, browserSessionPersistence);
+        await signInWithEmailAndPassword(auth, cleanEmail, password);
       },
 
       adminLogout: async () => {
-        await signOut(adminAuth);
+        await signOut(auth);
       },
     }),
     [adminUser, loadingAdmin, isAdmin],

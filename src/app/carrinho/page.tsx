@@ -198,8 +198,44 @@ function CarrinhoContent() {
     setAuthModal(true);
   }
 
+  function renderShippingLoading() {
+    if (!calculandoFrete) return null;
+
+    return (
+      <div
+        className="d-flex align-items-center gap-2 mt-3 p-3"
+        style={{
+          background: "#fff7ed",
+          borderRadius: 16,
+          border: `1px solid ${theme.border}`,
+          color: theme.brown,
+        }}
+      >
+        <span
+          className="spinner-border spinner-border-sm"
+          aria-hidden="true"
+          style={{
+            width: 22,
+            height: 22,
+            borderWidth: 2,
+            color: theme.brown,
+            flexShrink: 0,
+          }}
+        />
+
+        <div>
+          <strong>Estamos procurando os melhores fretes...</strong>
+          <br />
+          <small style={{ color: theme.brownSoft }}>
+            Aguarde alguns segundos enquanto consultamos as transportadoras.
+          </small>
+        </div>
+      </div>
+    );
+  }
+
   function renderShippingOptions() {
-    if (shippingOptions.length <= 0) return null;
+    if (calculandoFrete || shippingOptions.length <= 0) return null;
 
     return (
       <div className="mt-3 mb-3">
@@ -599,99 +635,153 @@ function CarrinhoContent() {
               const quantity = Number(item.quantity || 1);
               const stock = Math.max(Number(item.stock || 0), 0);
               const maxReached = quantity >= stock;
+              const itemSubtotal = Number(item.price || 0) * quantity;
+              const itemInfo = [item.size, item.color].filter(Boolean).join(" • ");
 
               return (
                 <div
                   key={item.id}
-                  className="d-flex gap-3 p-3 mb-3"
+                  className="mb-2"
                   style={{
                     background: theme.ivory2,
-                    borderRadius: 22,
-                    boxShadow: theme.shadow,
+                    borderRadius: 18,
+                    boxShadow: "0 10px 26px rgba(54,35,24,.08)",
+                    border: `1px solid ${theme.border}`,
+                    padding: 10,
                   }}
                 >
-                  <img
-                    src={item.images?.[0] || ""}
-                    alt={item.name}
-                    style={{
-                      width: 100,
-                      height: 120,
-                      objectFit: "contain",
-                      background: "#f3eadf",
-                      borderRadius: 18,
-                    }}
-                  />
+                  <div
+                    className="d-flex align-items-center gap-2 gap-md-3"
+                    style={{ minHeight: 76 }}
+                  >
+                    <img
+                      src={item.images?.[0] || ""}
+                      alt={item.name}
+                      style={{
+                        width: 58,
+                        height: 70,
+                        objectFit: "contain",
+                        background: "#f3eadf",
+                        borderRadius: 13,
+                        flexShrink: 0,
+                      }}
+                    />
 
-                  <div className="flex-grow-1">
-                    <h5 className="fw-bold">{item.name}</h5>
+                    <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                      <div className="d-flex align-items-start justify-content-between gap-2">
+                        <div style={{ minWidth: 0 }}>
+                          <h6
+                            className="fw-bold mb-1 text-truncate"
+                            title={item.name}
+                            style={{ color: theme.brownDark }}
+                          >
+                            {item.name}
+                          </h6>
 
-                    <p className="mb-1">
-                      {[item.size, item.color].filter(Boolean).join(" • ")}
-                    </p>
+                          <div
+                            className="d-flex flex-wrap align-items-center gap-2"
+                            style={{ fontSize: 13, color: theme.brownSoft }}
+                          >
+                            {itemInfo && <span>{itemInfo}</span>}
 
-                    <p className="mb-1" style={{ color: theme.brownSoft }}>
-                      Estoque disponível: <strong>{stock}</strong>
-                    </p>
+                            <span>
+                              Estoque: <strong>{stock}</strong>
+                            </span>
+                          </div>
+                        </div>
 
-                    <strong>{formatMoney(item.price)}</strong>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => removeFromCart(item.id)}
+                          title="Remover produto"
+                          aria-label="Remover produto"
+                          style={{
+                            borderRadius: "50%",
+                            width: 34,
+                            height: 34,
+                            padding: 0,
+                            flexShrink: 0,
+                          }}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
 
-                    <div className="d-flex align-items-center gap-2 mt-3 flex-wrap">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary"
-                        disabled={quantity <= 1}
-                        onClick={() => updateQuantity(item.id, quantity - 1)}
-                        style={{ borderRadius: 999 }}
+                      <div
+                        className="d-flex align-items-center justify-content-between gap-2 mt-2 flex-wrap"
                       >
-                        <Minus size={15} />
-                      </button>
+                        <div className="d-flex align-items-center gap-1">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            disabled={quantity <= 1}
+                            onClick={() => updateQuantity(item.id, quantity - 1)}
+                            style={{
+                              borderRadius: "50%",
+                              width: 30,
+                              height: 30,
+                              padding: 0,
+                            }}
+                          >
+                            <Minus size={14} />
+                          </button>
 
-                      <input
-                        type="number"
-                        min={1}
-                        max={stock || 1}
-                        value={quantity}
-                        onChange={(e) =>
-                          updateQuantity(item.id, Number(e.target.value || 1))
-                        }
-                        className="form-control form-control-sm text-center"
-                        style={{ width: 80, borderRadius: 999 }}
-                      />
+                          <input
+                            type="number"
+                            min={1}
+                            max={stock || 1}
+                            value={quantity}
+                            onChange={(e) =>
+                              updateQuantity(item.id, Number(e.target.value || 1))
+                            }
+                            className="form-control form-control-sm text-center"
+                            style={{
+                              width: 56,
+                              height: 30,
+                              borderRadius: 999,
+                              padding: "2px 6px",
+                            }}
+                          />
 
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary"
-                        disabled={stock <= 0 || maxReached}
-                        onClick={() => updateQuantity(item.id, quantity + 1)}
-                        style={{ borderRadius: 999 }}
-                      >
-                        <Plus size={15} />
-                      </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            disabled={stock <= 0 || maxReached}
+                            onClick={() => updateQuantity(item.id, quantity + 1)}
+                            style={{
+                              borderRadius: "50%",
+                              width: 30,
+                              height: 30,
+                              padding: 0,
+                            }}
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+
+                        <div
+                          className="d-flex align-items-center gap-2 ms-auto"
+                          style={{
+                            fontSize: 14,
+                            color: theme.brownDark,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <span>Qtd. {quantity}</span>
+                          <strong style={{ color: theme.brown }}>
+                            {formatMoney(itemSubtotal)}
+                          </strong>
+                        </div>
+                      </div>
 
                       {maxReached && stock > 0 && (
                         <small style={{ color: theme.brownSoft }}>
-                          máximo em estoque
+                          Quantidade máxima disponível em estoque.
                         </small>
                       )}
                     </div>
-
-                    <p className="mb-0 mt-2">
-                      Subtotal do item:{" "}
-                      <strong>
-                        {formatMoney(Number(item.price || 0) * quantity)}
-                      </strong>
-                    </p>
                   </div>
-
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-danger h-25"
-                    onClick={() => removeFromCart(item.id)}
-                    style={{ borderRadius: 999 }}
-                  >
-                    <Trash2 size={15} className="me-1" />
-                    Remover
-                  </button>
                 </div>
               );
             })}
@@ -773,6 +863,7 @@ function CarrinhoContent() {
                     escolhido abaixo.
                   </small>
 
+                  {!selectedAddressId && renderShippingLoading()}
                   {!selectedAddressId && renderShippingOptions()}
                 </div>
               )}
@@ -804,6 +895,7 @@ function CarrinhoContent() {
                             ))}
                           </select>
 
+                          {selectedAddressId && renderShippingLoading()}
                           {selectedAddressId && renderShippingOptions()}
 
                           {selectedAddress && (

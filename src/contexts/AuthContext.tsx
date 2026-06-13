@@ -24,15 +24,18 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const ADMIN_EMAIL =
+  process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() ||
+  "taisadefante@hotmail.com";
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL?.toLowerCase() || "";
-  const isAdmin = !!user?.email && user.email.toLowerCase() === adminEmail;
+  const isAdmin = !!user?.email && user.email.toLowerCase() === ADMIN_EMAIL;
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (current) => {
+    const unsub = onAuthStateChanged(auth, async (current) => {
       setUser(current);
       setLoading(false);
     });
@@ -47,15 +50,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isAdmin,
 
       login: async (email, password) => {
-        await signInWithEmailAndPassword(auth, email, password);
+        const cleanEmail = email.trim().toLowerCase();
+
+        await signInWithEmailAndPassword(auth, cleanEmail, password);
       },
 
       register: async (email, password) => {
-        return await createUserWithEmailAndPassword(auth, email, password);
+        const cleanEmail = email.trim().toLowerCase();
+
+        if (cleanEmail === ADMIN_EMAIL) {
+          throw new Error("Este e-mail é reservado para administração.");
+        }
+
+        return await createUserWithEmailAndPassword(auth, cleanEmail, password);
       },
 
       resetPassword: async (email) => {
-        await sendPasswordResetEmail(auth, email);
+        const cleanEmail = email.trim().toLowerCase();
+
+        await sendPasswordResetEmail(auth, cleanEmail);
       },
 
       logout: async () => {

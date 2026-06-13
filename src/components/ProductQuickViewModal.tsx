@@ -35,6 +35,8 @@ export default function ProductQuickViewModal({
 
   const details = [
     hasValue(product.category) && ["Categoria", product.category],
+    hasValue(product.type) && ["Tipo", product.type],
+    hasValue(product.subtype) && ["Subtipo", product.subtype],
     hasValue(product.size) && ["Tamanho", product.size],
     hasValue(product.age) && ["Idade", product.age],
     hasValue(product.gender) && ["Sexo", product.gender],
@@ -90,7 +92,9 @@ export default function ProductQuickViewModal({
                     width: "100%",
                     height: "100%",
                     objectFit: "contain",
-                    padding: 6,
+                    objectPosition: "center",
+                    background: "#f3eadf",
+                    display: "block",
                   }}
                 />
               ) : (
@@ -152,7 +156,10 @@ export default function ProductQuickViewModal({
                       style={{
                         width: "100%",
                         height: "100%",
-                        objectFit: "cover",
+                        objectFit: "contain",
+                        objectPosition: "center",
+                        background: "#f3eadf",
+                        display: "block",
                       }}
                     />
                   </button>
@@ -251,5 +258,6 @@ function modalArrowStyle(side: "left" | "right"): React.CSSProperties {
     borderRadius: "50%",
     border: "none",
     background: "rgba(255,255,255,.95)",
+    zIndex: 4,
   };
 }

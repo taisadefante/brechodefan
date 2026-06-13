@@ -17,7 +17,7 @@ import {
   User,
 } from "firebase/auth";
 
-import { adminAuth } from "@/lib/firebase-admin-auth";
+import { auth } from "@/lib/firebase";
 import { getAllSales, getProducts, updateSaleStatus } from "@/lib/firestore";
 import { Product, Sale, SaleStatus } from "@/types";
 import { formatMoney, statusLabel } from "@/lib/utils";
@@ -74,7 +74,7 @@ function AdminContent() {
     !!adminUser?.email && adminUser.email.toLowerCase() === ADMIN_EMAIL;
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(adminAuth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setAdminUser(currentUser);
       setLoading(false);
     });
@@ -121,7 +121,7 @@ function AdminContent() {
         return;
       }
 
-      await signInWithEmailAndPassword(adminAuth, cleanEmail, password);
+      await signInWithEmailAndPassword(auth, cleanEmail, password);
     } catch {
       setErro("E-mail ou senha incorretos.");
     } finally {
@@ -174,19 +174,13 @@ function AdminContent() {
 
   const dashboard = useMemo(() => {
     const validSales = periodSales.filter((sale) => sale.status !== "cancelado");
-
     const paidSales = periodSales.filter((sale) => sale.status === "pago");
-
     const pendingSales = periodSales.filter(
       (sale) => sale.status === "aguardando_pagamento",
     );
 
     const preparingSales = periodSales.filter((sale) =>
       ["separando", "pronto_envio", "pronto_retirada"].includes(sale.status),
-    );
-
-    const canceledSales = periodSales.filter(
-      (sale) => sale.status === "cancelado",
     );
 
     const cancelRequests = periodSales.filter(
@@ -219,16 +213,13 @@ function AdminContent() {
       0,
     );
 
-    const ticket =
-      paidSales.length > 0 ? paidRevenue / paidSales.length : 0;
+    const ticket = paidSales.length > 0 ? paidRevenue / paidSales.length : 0;
 
     return {
       periodSales: periodSales.length,
-      validSales: validSales.length,
       paidSales: paidSales.length,
       pendingSales: pendingSales.length,
       preparingSales: preparingSales.length,
-      canceledSales: canceledSales.length,
       cancelRequests: cancelRequests.length,
       periodRevenue,
       paidRevenue,
@@ -390,7 +381,6 @@ function AdminContent() {
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
           <div>
             <h1 className="fw-bold mb-1">Painel Administrativo</h1>
-
             <p className="mb-0" style={{ color: theme.brownSoft }}>
               Visão estratégica da loja, vendas, estoque e pendências.
             </p>
@@ -413,25 +403,17 @@ function AdminContent() {
         </div>
       </div>
 
-      <div
-        className="mb-4 p-3"
-        style={{
-          background: theme.ivory2,
-          borderRadius: 24,
-          boxShadow: theme.shadow,
-          border: `1px solid ${theme.border}`,
-        }}
-      >
+      <div className="mb-4 p-3" style={{
+        background: theme.ivory2,
+        borderRadius: 24,
+        boxShadow: theme.shadow,
+        border: `1px solid ${theme.border}`,
+      }}>
         <div className="row g-2 align-items-end">
           <div className="col-12 col-md-3">
             <label className="form-label">Dia</label>
-            <select
-              className="form-select"
-              value={filterDay}
-              onChange={(event) => setFilterDay(event.target.value)}
-            >
+            <select className="form-select" value={filterDay} onChange={(event) => setFilterDay(event.target.value)}>
               <option value="">Todos os dias</option>
-
               {Array.from({ length: 31 }).map((_, index) => (
                 <option key={index + 1} value={String(index + 1)}>
                   {index + 1}
@@ -442,39 +424,25 @@ function AdminContent() {
 
           <div className="col-12 col-md-3">
             <label className="form-label">Mês</label>
-            <select
-              className="form-select"
-              value={filterMonth}
-              onChange={(event) => setFilterMonth(event.target.value)}
-            >
+            <select className="form-select" value={filterMonth} onChange={(event) => setFilterMonth(event.target.value)}>
               <option value="">Todos os meses</option>
-              <option value="1">Janeiro</option>
-              <option value="2">Fevereiro</option>
-              <option value="3">Março</option>
-              <option value="4">Abril</option>
-              <option value="5">Maio</option>
-              <option value="6">Junho</option>
-              <option value="7">Julho</option>
-              <option value="8">Agosto</option>
-              <option value="9">Setembro</option>
-              <option value="10">Outubro</option>
-              <option value="11">Novembro</option>
-              <option value="12">Dezembro</option>
+              {[
+                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+              ].map((month, index) => (
+                <option key={month} value={String(index + 1)}>
+                  {month}
+                </option>
+              ))}
             </select>
           </div>
 
           <div className="col-12 col-md-3">
             <label className="form-label">Ano</label>
-            <select
-              className="form-select"
-              value={filterYear}
-              onChange={(event) => setFilterYear(event.target.value)}
-            >
+            <select className="form-select" value={filterYear} onChange={(event) => setFilterYear(event.target.value)}>
               <option value="">Todos os anos</option>
-
               {Array.from({ length: 6 }).map((_, index) => {
                 const year = new Date().getFullYear() - index;
-
                 return (
                   <option key={year} value={String(year)}>
                     {year}
@@ -485,12 +453,7 @@ function AdminContent() {
           </div>
 
           <div className="col-12 col-md-3">
-            <button
-              type="button"
-              className="btn btn-outline-secondary w-100"
-              onClick={clearPeriod}
-              style={{ borderRadius: 999 }}
-            >
+            <button type="button" className="btn btn-outline-secondary w-100" onClick={clearPeriod} style={{ borderRadius: 999 }}>
               Limpar período
             </button>
           </div>
@@ -499,34 +462,30 @@ function AdminContent() {
 
       <div className="row g-3 mb-4">
         {[
-          ["Vendas no período", dashboard.periodSales, <ShoppingBag size={22} />],
-          ["Pagas", dashboard.paidSales, <TrendingUp size={22} />],
-          ["Aguardando pagamento", dashboard.pendingSales, <AlertTriangle size={22} />],
-          ["Em separação/envio", dashboard.preparingSales, <Package size={22} />],
-          ["Faturamento no período", formatMoney(dashboard.periodRevenue), <TrendingUp size={22} />],
-          ["Receita paga", formatMoney(dashboard.paidRevenue), <TrendingUp size={22} />],
-          ["Ticket médio", formatMoney(dashboard.ticket), <ShoppingBag size={22} />],
-          ["Produtos disponíveis", dashboard.availableProducts, <Package size={22} />],
-          ["Estoque total", dashboard.totalStock, <Package size={22} />],
-          ["Estoque baixo", dashboard.lowStockProducts, <AlertTriangle size={22} />],
-          ["Reservados", dashboard.reservedProducts, <Package size={22} />],
-          ["Vendidos", dashboard.soldProducts, <ShoppingBag size={22} />],
+          ["Vendas no período", dashboard.periodSales, <ShoppingBag size={22} key="a" />],
+          ["Pagas", dashboard.paidSales, <TrendingUp size={22} key="b" />],
+          ["Aguardando pagamento", dashboard.pendingSales, <AlertTriangle size={22} key="c" />],
+          ["Em separação/envio", dashboard.preparingSales, <Package size={22} key="d" />],
+          ["Faturamento no período", formatMoney(dashboard.periodRevenue), <TrendingUp size={22} key="e" />],
+          ["Receita paga", formatMoney(dashboard.paidRevenue), <TrendingUp size={22} key="f" />],
+          ["Ticket médio", formatMoney(dashboard.ticket), <ShoppingBag size={22} key="g" />],
+          ["Produtos disponíveis", dashboard.availableProducts, <Package size={22} key="h" />],
+          ["Estoque total", dashboard.totalStock, <Package size={22} key="i" />],
+          ["Estoque baixo", dashboard.lowStockProducts, <AlertTriangle size={22} key="j" />],
+          ["Reservados", dashboard.reservedProducts, <Package size={22} key="k" />],
+          ["Vendidos", dashboard.soldProducts, <ShoppingBag size={22} key="l" />],
         ].map(([label, value, icon]) => (
           <div className="col-6 col-xl-3" key={String(label)}>
-            <div
-              className="p-3 h-100"
-              style={{
-                background: theme.ivory2,
-                borderRadius: 20,
-                boxShadow: theme.shadow,
-                border: `1px solid ${theme.border}`,
-              }}
-            >
+            <div className="p-3 h-100" style={{
+              background: theme.ivory2,
+              borderRadius: 20,
+              boxShadow: theme.shadow,
+              border: `1px solid ${theme.border}`,
+            }}>
               <div className="d-flex justify-content-between align-items-center gap-2">
                 <small style={{ color: theme.brownSoft }}>{label}</small>
                 <span style={{ color: theme.brown }}>{icon}</span>
               </div>
-
               <h4 className="fw-bold mb-0 mt-2">{value}</h4>
             </div>
           </div>
@@ -535,16 +494,13 @@ function AdminContent() {
 
       <div className="row g-4">
         <div className="col-12 col-xl-4">
-          <section
-            className="h-100"
-            style={{
-              background: theme.ivory2,
-              borderRadius: 24,
-              boxShadow: theme.shadow,
-              border: `1px solid ${theme.border}`,
-              overflow: "hidden",
-            }}
-          >
+          <section className="h-100" style={{
+            background: theme.ivory2,
+            borderRadius: 24,
+            boxShadow: theme.shadow,
+            border: `1px solid ${theme.border}`,
+            overflow: "hidden",
+          }}>
             <div className="p-3 border-bottom">
               <h4 className="fw-bold mb-1">Resumo estratégico</h4>
               <p className="mb-0" style={{ color: theme.brownSoft }}>
@@ -554,15 +510,11 @@ function AdminContent() {
 
             <div className="p-3">
               {strategicAlerts.map((alert) => (
-                <div
-                  key={alert}
-                  className="mb-2 p-3"
-                  style={{
-                    background: "#fffaf2",
-                    borderRadius: 16,
-                    border: `1px solid ${theme.border}`,
-                  }}
-                >
+                <div key={alert} className="mb-2 p-3" style={{
+                  background: "#fffaf2",
+                  borderRadius: 16,
+                  border: `1px solid ${theme.border}`,
+                }}>
                   <AlertTriangle size={16} className="me-2" />
                   {alert}
                 </div>
@@ -572,16 +524,13 @@ function AdminContent() {
         </div>
 
         <div className="col-12 col-xl-5">
-          <section
-            className="h-100"
-            style={{
-              background: theme.ivory2,
-              borderRadius: 24,
-              boxShadow: theme.shadow,
-              border: `1px solid ${theme.border}`,
-              overflow: "hidden",
-            }}
-          >
+          <section className="h-100" style={{
+            background: theme.ivory2,
+            borderRadius: 24,
+            boxShadow: theme.shadow,
+            border: `1px solid ${theme.border}`,
+            overflow: "hidden",
+          }}>
             <div className="p-3 border-bottom">
               <h4 className="fw-bold mb-1">Últimas vendas do período</h4>
               <p className="mb-0" style={{ color: theme.brownSoft }}>
@@ -666,16 +615,13 @@ function AdminContent() {
         </div>
 
         <div className="col-12 col-xl-3">
-          <section
-            className="h-100"
-            style={{
-              background: theme.ivory2,
-              borderRadius: 24,
-              boxShadow: theme.shadow,
-              border: `1px solid ${theme.border}`,
-              overflow: "hidden",
-            }}
-          >
+          <section className="h-100" style={{
+            background: theme.ivory2,
+            borderRadius: 24,
+            boxShadow: theme.shadow,
+            border: `1px solid ${theme.border}`,
+            overflow: "hidden",
+          }}>
             <div className="p-3 border-bottom">
               <h4 className="fw-bold mb-1">Estoque baixo</h4>
               <p className="mb-0" style={{ color: theme.brownSoft }}>
@@ -685,15 +631,11 @@ function AdminContent() {
 
             <div className="p-3">
               {lowStockPreview.map((product) => (
-                <div
-                  key={product.id}
-                  className="d-flex align-items-center gap-3 mb-3 p-2"
-                  style={{
-                    background: "#fffaf2",
-                    borderRadius: 16,
-                    border: `1px solid ${theme.border}`,
-                  }}
-                >
+                <div key={product.id} className="d-flex align-items-center gap-3 mb-3 p-2" style={{
+                  background: "#fffaf2",
+                  borderRadius: 16,
+                  border: `1px solid ${theme.border}`,
+                }}>
                   <img
                     src={product.images?.[0] || ""}
                     alt={product.name}
@@ -708,11 +650,9 @@ function AdminContent() {
 
                   <div>
                     <strong>{product.name}</strong>
-
                     <div style={{ fontSize: 13, color: theme.brownSoft }}>
                       Estoque: {Number(product.stock || 0)}
                     </div>
-
                     <div style={{ fontSize: 13 }}>
                       {formatMoney(product.price || 0)}
                     </div>

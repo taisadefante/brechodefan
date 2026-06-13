@@ -8,6 +8,7 @@ import {
   Eye,
   ShoppingBag,
 } from "lucide-react";
+
 import { Product } from "@/types";
 import { formatMoney } from "@/lib/utils";
 import { theme } from "@/lib/theme";
@@ -46,12 +47,11 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
   const { addToCart } = cart;
 
   const images = Array.isArray(product.images)
-    ? product.images.filter((image) => Boolean(image))
+    ? product.images.filter(Boolean)
     : [];
 
   const [index, setIndex] = useState(0);
   const currentImage = images[index];
-
   const added = productIsInCart(cart, product.id);
 
   const details = [
@@ -65,25 +65,24 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
   ].filter(Boolean) as [string, string][];
 
   function handleView() {
-    if (onView) {
-      onView();
-    }
+    if (onView) onView();
   }
 
   return (
-    <div
+    <article
       onClick={handleView}
       style={{
         background: "#fffaf3",
-        borderRadius: 24,
+        borderRadius: 26,
         overflow: "hidden",
         border: `1px solid ${theme.border}`,
-        boxShadow: "0 14px 32px rgba(54,35,24,.10)",
+        boxShadow: "0 18px 38px rgba(54,35,24,.10)",
         cursor: onView ? "pointer" : "default",
         height: "100%",
         display: "flex",
         flexDirection: "column",
         position: "relative",
+        transition: "transform .2s ease, box-shadow .2s ease",
       }}
     >
       {added && (
@@ -110,30 +109,48 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
 
       <div
         style={{
-          height: 340,
-          background: "#f3eadf",
+          width: "100%",
+          height: 300,
+          background:
+            "linear-gradient(180deg, #f5ecdf 0%, #efe2d3 100%)",
           position: "relative",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           overflow: "hidden",
+          padding: 14,
         }}
       >
-        {currentImage ? (
-          <img
-            src={currentImage}
-            alt={product.name || "Produto"}
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "contain",
-              padding: 10,
-              display: "block",
-            }}
-          />
-        ) : (
-          <span>Sem imagem</span>
-        )}
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            background: "#f8efe5",
+            borderRadius: 22,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+          }}
+        >
+          {currentImage ? (
+            <img
+              src={currentImage}
+              alt={product.name || "Produto"}
+              style={{
+                width: "100%",
+                height: "100%",
+                maxWidth: "100%",
+                maxHeight: "100%",
+                objectFit: "contain",
+                objectPosition: "center",
+                display: "block",
+              }}
+            />
+          ) : (
+            <span style={{ color: theme.brownSoft }}>Sem imagem</span>
+          )}
+        </div>
 
         {images.length > 1 && (
           <>
@@ -144,6 +161,7 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
                 setIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
               }}
               style={arrowStyle("left")}
+              aria-label="Imagem anterior"
             >
               <ChevronLeft size={18} />
             </button>
@@ -155,6 +173,7 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
                 setIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
               }}
               style={arrowStyle("right")}
+              aria-label="Próxima imagem"
             >
               <ChevronRight size={18} />
             </button>
@@ -164,10 +183,24 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
 
       <div
         className="p-3"
-        style={{ flex: 1, display: "flex", flexDirection: "column" }}
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          background: "#fffaf3",
+        }}
       >
         {hasValue(product.name) && (
-          <h5 className="fw-bold mb-1">{product.name}</h5>
+          <h5
+            className="fw-bold mb-1"
+            style={{
+              color: theme.brownDark,
+              lineHeight: 1.25,
+              minHeight: 28,
+            }}
+          >
+            {product.name}
+          </h5>
         )}
 
         <p className="fw-bold fs-5 mb-2" style={{ color: theme.brown }}>
@@ -176,15 +209,16 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
 
         {details.length > 0 && (
           <div className="d-flex flex-wrap gap-2 mb-3">
-            {details.map(([label, value]) => (
+            {details.map(([label, value], itemIndex) => (
               <span
-                key={`${label}-${value}`}
+                key={`${label}-${value}-${itemIndex}`}
                 style={{
                   fontSize: 12,
                   padding: "5px 9px",
                   borderRadius: 999,
                   background: "#efe2d3",
                   color: theme.brownDark,
+                  lineHeight: 1.2,
                 }}
               >
                 <strong>{label}:</strong> {value}
@@ -202,7 +236,10 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
                 e.stopPropagation();
                 onView();
               }}
-              style={{ borderRadius: 999 }}
+              style={{
+                borderRadius: 999,
+                fontWeight: 600,
+              }}
             >
               <Eye size={16} className="me-1" />
               Ver
@@ -220,6 +257,7 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
               background: added ? "#198754" : theme.brown,
               color: "#fff",
               borderRadius: 999,
+              fontWeight: 600,
             }}
           >
             {added ? (
@@ -236,20 +274,25 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
           </button>
         </div>
       </div>
-    </div>
+    </article>
   );
 }
 
 function arrowStyle(side: "left" | "right"): React.CSSProperties {
   return {
     position: "absolute",
-    [side]: 8,
+    [side]: 14,
     top: "50%",
     transform: "translateY(-50%)",
-    width: 34,
-    height: 34,
+    width: 36,
+    height: 36,
     borderRadius: "50%",
     border: "none",
-    background: "rgba(255,255,255,.95)",
+    background: "rgba(255,255,255,.96)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 6px 16px rgba(0,0,0,.14)",
+    zIndex: 4,
   };
 }

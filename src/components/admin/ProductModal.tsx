@@ -18,8 +18,8 @@ type ProductForm = Omit<Product, "id"> & {
   subtype?: string;
 };
 
-const CARD_IMAGE_WIDTH = 390;
-const CARD_IMAGE_HEIGHT = 520;
+const CROP_PREVIEW_SIZE = 520;
+const OUTPUT_SIZE = 1200;
 
 const shippingProfiles: Record<
   ShippingProfile,
@@ -103,6 +103,7 @@ function uniqueNames(names: string[]) {
 
   names.forEach((name) => {
     const cleanName = String(name || "").trim();
+
     const key = cleanName
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
@@ -114,6 +115,16 @@ function uniqueNames(names: string[]) {
   });
 
   return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+}
+
+function createInitialCrop(): Crop {
+  return {
+    unit: "%",
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+  };
 }
 
 export default function ProductModal({
@@ -166,14 +177,8 @@ export default function ProductModal({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cropSrc, setCropSrc] = useState("");
-  const [imageScale, setImageScale] = useState(1);
-  const [crop, setCrop] = useState<Crop>({
-    unit: "%",
-    x: 0,
-    y: 0,
-    width: 100,
-    height: 100,
-  });
+
+  const [crop, setCrop] = useState<Crop>(createInitialCrop());
   const [completedCrop, setCompletedCrop] = useState<PixelCrop | null>(null);
 
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -231,14 +236,7 @@ export default function ProductModal({
 
     reader.onload = () => {
       setCropSrc(String(reader.result || ""));
-      setImageScale(1);
-      setCrop({
-        unit: "%",
-        x: 0,
-        y: 0,
-        width: 100,
-        height: 100,
-      });
+      setCrop(createInitialCrop());
       setCompletedCrop(null);
     };
 
@@ -273,9 +271,6 @@ export default function ProductModal({
 
       if (!ctx) return null;
 
-      canvas.width = 1200;
-      canvas.height = 1600;
-
       const cropToUse =
         completedCrop?.width && completedCrop?.height
           ? completedCrop
@@ -294,15 +289,19 @@ export default function ProductModal({
       const sourceWidth = cropToUse.width * scaleX;
       const sourceHeight = cropToUse.height * scaleY;
 
+      canvas.width = OUTPUT_SIZE;
+      canvas.height = OUTPUT_SIZE;
+
+      ctx.fillStyle = "#f3eadf";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
       const fitRatio = Math.min(
         canvas.width / sourceWidth,
         canvas.height / sourceHeight,
       );
 
-      const finalRatio = fitRatio * imageScale;
-
-      const drawWidth = sourceWidth * finalRatio;
-      const drawHeight = sourceHeight * finalRatio;
+      const drawWidth = sourceWidth * fitRatio;
+      const drawHeight = sourceHeight * fitRatio;
       const drawX = (canvas.width - drawWidth) / 2;
       const drawY = (canvas.height - drawHeight) / 2;
 
@@ -331,7 +330,7 @@ export default function ProductModal({
 
       setCropSrc("");
       setCompletedCrop(null);
-      setImageScale(1);
+      setCrop(createInitialCrop());
 
       return uploadedUrl;
     } finally {
@@ -349,6 +348,7 @@ export default function ProductModal({
         width: 10,
         length: 15,
       });
+
       return;
     }
 
@@ -368,6 +368,7 @@ export default function ProductModal({
   function getSelectOptions(fieldType: ExtendedOptionType) {
     if (fieldType === "tipos") return availableTypes;
     if (fieldType === "subtipos") return availableSubtypes;
+
     return options[fieldType] || [];
   }
 
@@ -386,6 +387,7 @@ export default function ProductModal({
   function selectIsDisabled(fieldType: ExtendedOptionType) {
     if (fieldType === "tipos") return !form.category;
     if (fieldType === "subtipos") return !form.type;
+
     return false;
   }
 
@@ -531,6 +533,7 @@ export default function ProductModal({
           <div className="row g-3">
             <div className="col-md-8">
               <label className="form-label">Nome</label>
+
               <input
                 className="form-control"
                 value={form.name}
@@ -540,6 +543,7 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Preço</label>
+
               <input
                 className="form-control"
                 type="number"
@@ -554,6 +558,7 @@ export default function ProductModal({
 
             <div className="col-12">
               <label className="form-label">Descrição</label>
+
               <textarea
                 className="form-control"
                 rows={3}
@@ -629,6 +634,7 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Estoque</label>
+
               <input
                 className="form-control"
                 type="number"
@@ -642,6 +648,7 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Status</label>
+
               <select
                 className="form-select"
                 value={form.status}
@@ -661,6 +668,7 @@ export default function ProductModal({
 
             <div className="col-12">
               <label className="form-label">Medidas da peça</label>
+
               <input
                 className="form-control"
                 placeholder="Ex: comprimento, largura, busto, cintura..."
@@ -729,10 +737,11 @@ export default function ProductModal({
                       alt=""
                       style={{
                         width: 110,
-                        height: 145,
+                        height: 110,
                         objectFit: "contain",
                         background: "#f3eadf",
                         borderRadius: 16,
+                        border: `1px solid ${theme.border}`,
                       }}
                     />
 
@@ -771,41 +780,40 @@ export default function ProductModal({
                 >
                   <p className="fw-bold mb-1">Editar nova imagem</p>
 
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2.5"
-                    step="0.05"
-                    value={imageScale}
-                    className="form-range"
-                    onChange={(e) => setImageScale(Number(e.target.value))}
-                  />
+                  <small style={{ color: theme.brownSoft }}>
+                    Arraste as bordas para cortar livremente. Pode selecionar a
+                    imagem toda ou apenas a parte desejada. Depois ela será
+                    encaixada no card sem cortar.
+                  </small>
 
                   <div
+                    className="mt-3"
                     style={{
-                      width: CARD_IMAGE_WIDTH,
-                      height: CARD_IMAGE_HEIGHT,
+                      width: CROP_PREVIEW_SIZE,
                       maxWidth: "100%",
                       background: "#f3eadf",
                       borderRadius: 18,
                       overflow: "hidden",
+                      border: `1px solid ${theme.border}`,
                     }}
                   >
                     <ReactCrop
                       crop={crop}
                       onChange={(_, percentCrop) => setCrop(percentCrop)}
                       onComplete={(pixelCrop) => setCompletedCrop(pixelCrop)}
+                      keepSelection
                     >
                       <img
                         ref={imageRef}
                         src={cropSrc}
                         alt="Cortar"
+                        onLoad={() => {
+                          setCrop(createInitialCrop());
+                        }}
                         style={{
-                          width: CARD_IMAGE_WIDTH,
-                          height: CARD_IMAGE_HEIGHT,
-                          objectFit: "contain",
-                          transform: `scale(${imageScale})`,
-                          transformOrigin: "center center",
+                          width: "100%",
+                          height: "auto",
+                          display: "block",
                         }}
                       />
                     </ReactCrop>
@@ -833,7 +841,7 @@ export default function ProductModal({
                       onClick={() => {
                         setCropSrc("");
                         setCompletedCrop(null);
-                        setImageScale(1);
+                        setCrop(createInitialCrop());
                       }}
                       style={{ borderRadius: 999 }}
                     >
@@ -865,7 +873,11 @@ export default function ProductModal({
         <OptionManagerModal
           type={manager.type}
           title={manager.title}
-          parentCategory={manager.type === "tipos" || manager.type === "subtipos" ? form.category || "" : ""}
+          parentCategory={
+            manager.type === "tipos" || manager.type === "subtipos"
+              ? form.category || ""
+              : ""
+          }
           parentType={manager.type === "subtipos" ? form.type || "" : ""}
           onClose={() => setManager(null)}
           onChange={loadOptions}
