@@ -1,146 +1,122 @@
 "use client";
 
-import { Heart, Instagram, MessageCircle } from "lucide-react";
-
 export default function Footer() {
   return (
     <footer
       style={{
-        marginTop: 80,
+        marginTop: 60,
         background:
           "linear-gradient(135deg,#2b140a 0%,#4a2816 50%,#6f4128 100%)",
         color: "#fff",
       }}
     >
-      <div className="container py-5">
-        <div className="row g-4">
-          <div className="col-lg-4">
-            <h3
-              style={{
-                fontWeight: 800,
-                marginBottom: 16,
-              }}
-            >
-              Defan Brechó
-            </h3>
+      <div
+        className="container-fluid px-3 px-md-5"
+        style={{
+          maxWidth: 1400,
+        }}
+      >
+        <div className="py-4 py-md-5">
+          <div className="row g-4 text-center text-md-start">
+            <div className="col-12 col-md-4">
+              <h4
+                style={{
+                  fontWeight: 800,
+                  marginBottom: 12,
+                }}
+              >
+                Defan Brechó
+              </h4>
 
-            <p
-              style={{
-                color: "rgba(255,255,255,.75)",
-                lineHeight: 1.8,
-                marginBottom: 0,
-              }}
-            >
-              Moda circular com peças únicas selecionadas. Compras online com
-              segurança e atendimento personalizado.
-            </p>
-          </div>
+              <p
+                style={{
+                  color: "rgba(255,255,255,.75)",
+                  margin: 0,
+                  lineHeight: 1.7,
+                }}
+              >
+                Moda circular com peças selecionadas, preços acessíveis e compra
+                segura.
+              </p>
+            </div>
 
-          <div className="col-lg-4">
-            <h5
-              style={{
-                fontWeight: 700,
-                marginBottom: 16,
-              }}
-            >
-              Informações
-            </h5>
+            <div className="col-12 col-md-4">
+              <h5
+                style={{
+                  fontWeight: 700,
+                  marginBottom: 12,
+                }}
+              >
+                Benefícios
+              </h5>
 
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-              }}
-            >
-              <span>📍 Realengo - RJ</span>
-              <span>🚚 Entrega para todo Brasil</span>
-              <span>♻️ Moda sustentável</span>
-              <span>🛍️ Peças únicas</span>
+              <div
+                style={{
+                  color: "rgba(255,255,255,.75)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <span>🚚 Entrega para todo Brasil</span>
+                <span>💳 Pagamento via Mercado Pago</span>
+                <span>♻️ Moda sustentável</span>
+                <span>🛍️ Produtos selecionados</span>
+              </div>
+            </div>
+
+            <div className="col-12 col-md-4">
+              <h5
+                style={{
+                  fontWeight: 700,
+                  marginBottom: 12,
+                }}
+              >
+                Compra Segura
+              </h5>
+
+              <div
+                style={{
+                  color: "rgba(255,255,255,.75)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <span>🔒 Ambiente seguro</span>
+                <span>📦 Produtos disponíveis</span>
+                <span>🏠 Retirada em Realengo/RJ</span>
+                <span>⭐ Atendimento personalizado</span>
+              </div>
             </div>
           </div>
 
-          <div className="col-lg-4">
-            <h5
-              style={{
-                fontWeight: 700,
-                marginBottom: 16,
-              }}
-            >
-              Contato
-            </h5>
-
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-              }}
-            >
-              <a
-                href="https://wa.me/5521988359825"
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  color: "#fff",
-                  textDecoration: "none",
-                }}
-              >
-                <MessageCircle size={18} style={{ marginRight: 8 }} />
-                WhatsApp
-              </a>
-
-              <a
-                href="https://instagram.com"
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  color: "#fff",
-                  textDecoration: "none",
-                }}
-              >
-                <Instagram size={18} style={{ marginRight: 8 }} />
-                Instagram
-              </a>
-            </div>
-          </div>
-        </div>
-
-        <hr
-          style={{
-            borderColor: "rgba(255,255,255,.15)",
-            margin: "30px 0 20px",
-          }}
-        />
-
-        <div className="d-flex flex-column flex-md-row justify-content-between align-items-center gap-3">
-          <div
+          <hr
             style={{
-              color: "rgba(255,255,255,.75)",
+              borderColor: "rgba(255,255,255,.12)",
+              margin: "24px 0",
+            }}
+          />
+
+          <div
+            className="text-center"
+            style={{
+              color: "rgba(255,255,255,.70)",
+              fontSize: 14,
             }}
           >
-            © {new Date().getFullYear()} Defan Brechó
+            © {new Date().getFullYear()} Defan Brechó • Todos os direitos
+            reservados
           </div>
 
-          <a
-            href="https://wa.me/5521988359825"
-            target="_blank"
-            rel="noreferrer"
+          <div
+            className="text-center mt-2"
             style={{
-              color: "#fff",
-              textDecoration: "none",
-              fontWeight: 700,
+              color: "rgba(255,255,255,.55)",
+              fontSize: 13,
             }}
           >
             Desenvolvido por Defan Soluções Digitais
-          </a>
-
-          <div
-            style={{
-              color: "rgba(255,255,255,.75)",
-            }}
-          >
-            Feito com <Heart size={14} fill="currentColor" />
           </div>
         </div>
       </div>

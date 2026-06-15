@@ -17,15 +17,19 @@ import { Sale, SaleStatus } from "@/types";
 import { formatMoney, statusLabel } from "@/lib/utils";
 import { theme } from "@/lib/theme";
 
-type MonthlyBilling = {
-  month: number;
-  monthName: string;
-  salesCount: number;
-  total: number;
-  paidTotal: number;
-  pendingTotal: number;
-  canceledTotal: number;
-  daily: DailyBilling[];
+type SaleItemWithCost = Sale["items"][number] & {
+  costPrice?: number;
+};
+
+type SaleWithCost = Sale & {
+  items: SaleItemWithCost[];
+  productsRevenue?: number;
+  productsCost?: number;
+  shippingRevenue?: number;
+  shippingCostPaidByStore?: number;
+  shippingCost?: number;
+  grossProfit?: number;
+  netProfit?: number;
 };
 
 type DailyBilling = {
@@ -33,8 +37,29 @@ type DailyBilling = {
   dateLabel: string;
   salesCount: number;
   total: number;
+  shippingRevenue: number;
+  cost: number;
+  grossProfit: number;
+  netProfit: number;
   paidTotal: number;
   pendingTotal: number;
+};
+
+type MonthlyBilling = {
+  month: number;
+  monthName: string;
+  salesCount: number;
+  total: number;
+  shippingRevenue: number;
+  cost: number;
+  grossProfit: number;
+  netProfit: number;
+  margin: number;
+  netMargin: number;
+  paidTotal: number;
+  pendingTotal: number;
+  canceledTotal: number;
+  daily: DailyBilling[];
 };
 
 const monthNames = [
@@ -65,7 +90,7 @@ const statusOptions: ("todos" | SaleStatus)[] = [
   "cancelado",
 ];
 
-function getSaleDate(sale: Sale) {
+function getSaleDate(sale: SaleWithCost) {
   if (!sale.createdAt) return null;
 
   const date =
@@ -78,12 +103,38 @@ function getSaleDate(sale: Sale) {
   return date;
 }
 
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0,00%";
+
+  return `${value.toFixed(2).replace(".", ",")}%`;
+}
+
+function calculateProductsTotal(sale: SaleWithCost) {
+  return (sale.items || []).reduce((sum, item) => {
+    return sum + Number(item.price || 0) * Number(item.quantity || 1);
+  }, 0);
+}
+
+function calculateProductsCost(sale: SaleWithCost) {
+  return (sale.items || []).reduce((sum, item) => {
+    return sum + Number(item.costPrice || 0) * Number(item.quantity || 1);
+  }, 0);
+}
+
+function calculateShippingRevenue(sale: SaleWithCost) {
+  return Number(sale.deliveryPrice || sale.shippingRevenue || 0);
+}
+
+function calculateShippingCostPaidByStore(sale: SaleWithCost) {
+  return Number(sale.shippingCostPaidByStore || sale.shippingCost || 0);
+}
+
 function AdminFaturamentoContent() {
   const { adminUser, loadingAdmin, isAdmin } = useAdminAuth();
 
   const currentYear = new Date().getFullYear();
 
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [sales, setSales] = useState<SaleWithCost[]>([]);
   const [loading, setLoading] = useState(false);
   const [openMonth, setOpenMonth] = useState<number | null>(
     new Date().getMonth() + 1,
@@ -99,7 +150,7 @@ function AdminFaturamentoContent() {
     setLoading(true);
 
     try {
-      const list = await getAllSales();
+      const list = (await getAllSales()) as SaleWithCost[];
       setSales(list);
     } catch (error) {
       console.error("Erro ao carregar faturamento:", error);
@@ -139,6 +190,7 @@ function AdminFaturamentoContent() {
 
       if (yearFilter && saleYear !== yearFilter) return false;
       if (monthFilter && saleMonth !== monthFilter) return false;
+
       if (statusFilter !== "todos" && sale.status !== statusFilter) {
         return false;
       }
@@ -154,6 +206,12 @@ function AdminFaturamentoContent() {
         monthName: monthNames[index],
         salesCount: 0,
         total: 0,
+        shippingRevenue: 0,
+        cost: 0,
+        grossProfit: 0,
+        netProfit: 0,
+        margin: 0,
+        netMargin: 0,
         paidTotal: 0,
         pendingTotal: 0,
         canceledTotal: 0,
@@ -167,24 +225,35 @@ function AdminFaturamentoContent() {
 
       const monthIndex = date.getMonth();
       const day = date.getDate();
-      const value = Number(sale.total || 0);
+
+      const saleTotal = Number(sale.total || 0);
+      const productsTotal = calculateProductsTotal(sale);
+      const productsCost = calculateProductsCost(sale);
+      const shippingRevenue = calculateShippingRevenue(sale);
+      const shippingCostPaidByStore = calculateShippingCostPaidByStore(sale);
+      const productsProfit = productsTotal - productsCost;
+      const netProfit = productsProfit - shippingCostPaidByStore;
 
       const monthData = months[monthIndex];
 
       monthData.salesCount += 1;
 
       if (sale.status !== "cancelado") {
-        monthData.total += value;
+        monthData.total += saleTotal;
+        monthData.shippingRevenue += shippingRevenue;
+        monthData.cost += productsCost;
+        monthData.grossProfit += productsProfit;
+        monthData.netProfit += netProfit;
       } else {
-        monthData.canceledTotal += value;
+        monthData.canceledTotal += saleTotal;
       }
 
       if (sale.status === "pago") {
-        monthData.paidTotal += value;
+        monthData.paidTotal += saleTotal;
       }
 
       if (sale.status === "aguardando_pagamento") {
-        monthData.pendingTotal += value;
+        monthData.pendingTotal += saleTotal;
       }
 
       let dayData = monthData.daily.find((item) => item.day === day);
@@ -197,6 +266,10 @@ function AdminFaturamentoContent() {
           ).padStart(2, "0")}/${date.getFullYear()}`,
           salesCount: 0,
           total: 0,
+          shippingRevenue: 0,
+          cost: 0,
+          grossProfit: 0,
+          netProfit: 0,
           paidTotal: 0,
           pendingTotal: 0,
         };
@@ -207,15 +280,19 @@ function AdminFaturamentoContent() {
       dayData.salesCount += 1;
 
       if (sale.status !== "cancelado") {
-        dayData.total += value;
+        dayData.total += saleTotal;
+        dayData.shippingRevenue += shippingRevenue;
+        dayData.cost += productsCost;
+        dayData.grossProfit += productsProfit;
+        dayData.netProfit += netProfit;
       }
 
       if (sale.status === "pago") {
-        dayData.paidTotal += value;
+        dayData.paidTotal += saleTotal;
       }
 
       if (sale.status === "aguardando_pagamento") {
-        dayData.pendingTotal += value;
+        dayData.pendingTotal += saleTotal;
       }
     });
 
@@ -225,6 +302,10 @@ function AdminFaturamentoContent() {
       )
       .map((month) => ({
         ...month,
+        margin:
+          month.total > 0 ? (month.grossProfit / Math.max(month.total - month.shippingRevenue, 1)) * 100 : 0,
+        netMargin:
+          month.total > 0 ? (month.netProfit / Math.max(month.total - month.shippingRevenue, 1)) * 100 : 0,
         daily: month.daily.sort((a, b) => a.day - b.day),
       }));
   }, [filteredSales, monthFilter]);
@@ -249,6 +330,31 @@ function AdminFaturamentoContent() {
       0,
     );
 
+    const productsRevenue = validSales.reduce(
+      (sum, sale) => sum + calculateProductsTotal(sale),
+      0,
+    );
+
+    const productsCost = validSales.reduce(
+      (sum, sale) => sum + calculateProductsCost(sale),
+      0,
+    );
+
+    const shippingRevenue = validSales.reduce(
+      (sum, sale) => sum + calculateShippingRevenue(sale),
+      0,
+    );
+
+    const shippingCostPaidByStore = validSales.reduce(
+      (sum, sale) => sum + calculateShippingCostPaidByStore(sale),
+      0,
+    );
+
+    const profit = productsRevenue - productsCost;
+    const netProfit = profit - shippingCostPaidByStore;
+    const margin = productsRevenue > 0 ? (profit / productsRevenue) * 100 : 0;
+    const netMargin = productsRevenue > 0 ? (netProfit / productsRevenue) * 100 : 0;
+
     return {
       salesCount: filteredSales.length,
       validSalesCount: validSales.length,
@@ -256,6 +362,14 @@ function AdminFaturamentoContent() {
       pendingCount: pendingSales.length,
       canceledCount: canceledSales.length,
       total,
+      productsRevenue,
+      shippingRevenue,
+      productsCost,
+      shippingCostPaidByStore,
+      profit,
+      netProfit,
+      margin,
+      netMargin,
       paidTotal: paidSales.reduce(
         (sum, sale) => sum + Number(sale.total || 0),
         0,
@@ -307,7 +421,7 @@ function AdminFaturamentoContent() {
             <h1 className="fw-bold mb-1">Faturamento</h1>
 
             <p className="mb-0" style={{ color: theme.brownSoft }}>
-              Visão mensal, diária e estratégica das vendas.
+              Visão mensal, diária, custo, lucro e margem das vendas.
             </p>
           </div>
 
@@ -411,18 +525,17 @@ function AdminFaturamentoContent() {
 
       <div className="row g-3 mb-4">
         {[
-          ["Faturamento", formatMoney(summary.total), <DollarSign size={22} />],
+          ["Faturamento total", formatMoney(summary.total), <DollarSign size={22} />],
           ["Recebido", formatMoney(summary.paidTotal), <TrendingUp size={22} />],
-          [
-            "A receber",
-            formatMoney(summary.pendingTotal),
-            <CalendarDays size={22} />,
-          ],
-          [
-            "Ticket médio",
-            formatMoney(summary.averageTicket),
-            <ShoppingBag size={22} />,
-          ],
+          ["A receber", formatMoney(summary.pendingTotal), <CalendarDays size={22} />],
+          ["Venda produtos", formatMoney(summary.productsRevenue), <DollarSign size={22} />],
+          ["Frete recebido", formatMoney(summary.shippingRevenue), <DollarSign size={22} />],
+          ["Custo produtos", formatMoney(summary.productsCost), <ShoppingBag size={22} />],
+          ["Lucro bruto", formatMoney(summary.profit), <TrendingUp size={22} />],
+          ["Lucro líquido", formatMoney(summary.netProfit), <TrendingUp size={22} />],
+          ["Margem bruta", formatPercent(summary.margin), <TrendingUp size={22} />],
+          ["Margem líquida", formatPercent(summary.netMargin), <TrendingUp size={22} />],
+          ["Ticket médio", formatMoney(summary.averageTicket), <ShoppingBag size={22} />],
           ["Vendas válidas", summary.validSalesCount, <ShoppingBag size={22} />],
           ["Pagas", summary.paidCount, <TrendingUp size={22} />],
           ["Pendentes", summary.pendingCount, <CalendarDays size={22} />],
@@ -472,7 +585,12 @@ function AdminFaturamentoContent() {
               <tr>
                 <th>Mês</th>
                 <th>Vendas</th>
-                <th>Total</th>
+                <th>Total com frete</th>
+                <th>Frete</th>
+                <th>Custo</th>
+                <th>Lucro bruto</th>
+                <th>Lucro líquido</th>
+                <th>Margem</th>
                 <th>Recebido</th>
                 <th>A receber</th>
                 <th>Cancelado</th>
@@ -496,6 +614,28 @@ function AdminFaturamentoContent() {
                       <td>
                         <strong>{formatMoney(month.total)}</strong>
                       </td>
+
+                      <td>{formatMoney(month.shippingRevenue)}</td>
+
+                      <td>{formatMoney(month.cost)}</td>
+
+                      <td>
+                        <strong
+                          style={{
+                            color: month.grossProfit >= 0 ? "#198754" : "#dc3545",
+                          }}
+                        >
+                          {formatMoney(month.grossProfit)}
+                        </strong>
+                      </td>
+
+                      <td>
+                        <strong style={{ color: month.netProfit >= 0 ? "#198754" : "#dc3545" }}>
+                          {formatMoney(month.netProfit)}
+                        </strong>
+                      </td>
+
+                      <td>{formatPercent(month.margin)}</td>
 
                       <td>{formatMoney(month.paidTotal)}</td>
 
@@ -528,7 +668,7 @@ function AdminFaturamentoContent() {
 
                     {isOpen && (
                       <tr>
-                        <td colSpan={7} style={{ background: "#fffaf2" }}>
+                        <td colSpan={11} style={{ background: "#fffaf2" }}>
                           <div className="p-3">
                             <h6 className="fw-bold mb-3">
                               Somas diárias de {month.monthName}
@@ -541,7 +681,11 @@ function AdminFaturamentoContent() {
                                     <tr>
                                       <th>Dia</th>
                                       <th>Vendas</th>
-                                      <th>Total</th>
+                                      <th>Total com frete</th>
+                                      <th>Frete</th>
+                                      <th>Custo</th>
+                                      <th>Lucro bruto</th>
+                                      <th>Lucro líquido</th>
                                       <th>Recebido</th>
                                       <th>A receber</th>
                                     </tr>
@@ -553,8 +697,25 @@ function AdminFaturamentoContent() {
                                         <td>{day.dateLabel}</td>
                                         <td>{day.salesCount}</td>
                                         <td>
-                                          <strong>
-                                            {formatMoney(day.total)}
+                                          <strong>{formatMoney(day.total)}</strong>
+                                        </td>
+                                        <td>{formatMoney(day.shippingRevenue)}</td>
+                                        <td>{formatMoney(day.cost)}</td>
+                                        <td>
+                                          <strong
+                                            style={{
+                                              color:
+                                                day.grossProfit >= 0
+                                                  ? "#198754"
+                                                  : "#dc3545",
+                                            }}
+                                          >
+                                            {formatMoney(day.grossProfit)}
+                                          </strong>
+                                        </td>
+                                        <td>
+                                          <strong style={{ color: day.netProfit >= 0 ? "#198754" : "#dc3545" }}>
+                                            {formatMoney(day.netProfit)}
                                           </strong>
                                         </td>
                                         <td>{formatMoney(day.paidTotal)}</td>

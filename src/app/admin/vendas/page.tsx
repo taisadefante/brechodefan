@@ -28,8 +28,20 @@ type CustomerWithDocument = CustomerData & {
   cnpj?: string;
 };
 
+type SaleItemWithCost = Sale["items"][number] & {
+  costPrice?: number;
+};
+
 type SaleWithDocument = Sale & {
   customer: CustomerWithDocument;
+  items: SaleItemWithCost[];
+  productsRevenue?: number;
+  productsCost?: number;
+  shippingRevenue?: number;
+  shippingCostPaidByStore?: number;
+  shippingCost?: number;
+  grossProfit?: number;
+  netProfit?: number;
 };
 
 type ApiResponseData = {
@@ -54,6 +66,48 @@ const statuses: SaleStatus[] = [
 
 function onlyNumbers(value?: string) {
   return String(value || "").replace(/\D/g, "");
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0,00%";
+  return `${value.toFixed(2).replace(".", ",")}%`;
+}
+
+function calculateSaleCost(sale: SaleWithDocument) {
+  return (sale.items || []).reduce((sum, item) => {
+    return sum + Number(item.costPrice || 0) * Number(item.quantity || 1);
+  }, 0);
+}
+
+function calculateSaleProductsTotal(sale: SaleWithDocument) {
+  return (sale.items || []).reduce((sum, item) => {
+    return sum + Number(item.price || 0) * Number(item.quantity || 1);
+  }, 0);
+}
+
+function calculateSaleShippingRevenue(sale: SaleWithDocument) {
+  return Number(sale.deliveryPrice || sale.shippingRevenue || 0);
+}
+
+function calculateSaleShippingCostPaidByStore(sale: SaleWithDocument) {
+  return Number(sale.shippingCostPaidByStore || sale.shippingCost || 0);
+}
+
+function calculateSaleProfit(sale: SaleWithDocument) {
+  return calculateSaleProductsTotal(sale) - calculateSaleCost(sale);
+}
+
+function calculateSaleNetProfit(sale: SaleWithDocument) {
+  return calculateSaleProfit(sale) - calculateSaleShippingCostPaidByStore(sale);
+}
+
+function calculateSaleMargin(sale: SaleWithDocument) {
+  const productsTotal = calculateSaleProductsTotal(sale);
+  const profit = calculateSaleProfit(sale);
+
+  if (productsTotal <= 0) return 0;
+
+  return (profit / productsTotal) * 100;
 }
 
 function isValidCpf(value?: string) {
@@ -138,9 +192,7 @@ function formatCpfCnpj(value?: string) {
 }
 
 function getCustomerDocument(customer?: CustomerWithDocument | null) {
-  return onlyNumbers(
-    customer?.document || customer?.cpf || customer?.cnpj || "",
-  );
+  return onlyNumbers(customer?.document || customer?.cpf || customer?.cnpj || "");
 }
 
 function deliveryTypeLabel(type?: string) {
@@ -194,9 +246,9 @@ function AdminVendasContent() {
   const [updatingSaleId, setUpdatingSaleId] = useState<string | null>(null);
   const [saleToGenerateLabel, setSaleToGenerateLabel] =
     useState<SaleWithDocument | null>(null);
-  const [generatingLabel, setGeneratingLabel] = useState<
-    Record<string, boolean>
-  >({});
+  const [generatingLabel, setGeneratingLabel] = useState<Record<string, boolean>>(
+    {},
+  );
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"todos" | SaleStatus>(
@@ -273,6 +325,31 @@ function AdminVendasContent() {
   const totals = useMemo(() => {
     const validSales = filteredSales.filter((sale) => sale.status !== "cancelado");
 
+    const productsRevenue = validSales.reduce(
+      (sum, sale) => sum + calculateSaleProductsTotal(sale),
+      0,
+    );
+
+    const productsCost = validSales.reduce(
+      (sum, sale) => sum + calculateSaleCost(sale),
+      0,
+    );
+
+    const shippingRevenue = validSales.reduce(
+      (sum, sale) => sum + calculateSaleShippingRevenue(sale),
+      0,
+    );
+
+    const shippingCostPaidByStore = validSales.reduce(
+      (sum, sale) => sum + calculateSaleShippingCostPaidByStore(sale),
+      0,
+    );
+
+    const profit = productsRevenue - productsCost;
+    const netProfit = profit - shippingCostPaidByStore;
+    const margin = productsRevenue > 0 ? (profit / productsRevenue) * 100 : 0;
+    const netMargin = productsRevenue > 0 ? (netProfit / productsRevenue) * 100 : 0;
+
     return {
       quantity: filteredSales.length,
       paid: filteredSales.filter((sale) => sale.status === "pago").length,
@@ -283,6 +360,14 @@ function AdminVendasContent() {
         (sum, sale) => sum + Number(sale.total || 0),
         0,
       ),
+      productsRevenue,
+      shippingRevenue,
+      productsCost,
+      shippingCostPaidByStore,
+      profit,
+      netProfit,
+      margin,
+      netMargin,
     };
   }, [filteredSales]);
 
@@ -533,33 +618,12 @@ function AdminVendasContent() {
         <head>
           <title>Pedido ${saleId}</title>
           <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 24px;
-              color: #3b2418;
-            }
-
-            .product {
-              display: flex;
-              gap: 12px;
-              border-bottom: 1px solid #eee;
-              padding: 10px 0;
-            }
-
-            .product img {
-              width: 70px;
-              height: 85px;
-              object-fit: contain;
-              background: #f3eadf;
-              border-radius: 8px;
-            }
-
-            small {
-              color: #7a5c4c;
-            }
+            body { font-family: Arial, sans-serif; padding: 24px; color: #3b2418; }
+            .product { display: flex; gap: 12px; border-bottom: 1px solid #eee; padding: 10px 0; }
+            .product img { width: 70px; height: 85px; object-fit: contain; background: #f3eadf; border-radius: 8px; }
+            small { color: #7a5c4c; }
           </style>
         </head>
-
         <body>
           ${content.innerHTML}
           <script>window.print();</script>
@@ -625,7 +689,6 @@ function AdminVendasContent() {
             <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
               <div>
                 <h4 className="fw-bold mb-1">Confirmar geração de etiqueta</h4>
-
                 <p className="mb-0" style={{ color: theme.brownSoft }}>
                   Essa ação pode comprar a etiqueta no Melhor Envio.
                 </p>
@@ -723,9 +786,8 @@ function AdminVendasContent() {
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-3">
           <div>
             <h1 className="fw-bold mb-1">Vendas</h1>
-
             <p className="mb-0" style={{ color: theme.brownSoft }}>
-              Lista responsiva com filtros, dados principais e status editável.
+              Acompanhe pedidos, faturamento, custo, lucro e margem.
             </p>
           </div>
 
@@ -752,7 +814,14 @@ function AdminVendasContent() {
           ["Vendas filtradas", totals.quantity],
           ["Pagas", totals.paid],
           ["Aguardando pagamento", totals.pending],
-          ["Valor filtrado", formatMoney(totals.revenue)],
+          ["Total com frete", formatMoney(totals.revenue)],
+          ["Venda produtos", formatMoney(totals.productsRevenue)],
+          ["Frete recebido", formatMoney(totals.shippingRevenue)],
+          ["Custo produtos", formatMoney(totals.productsCost)],
+          ["Lucro bruto", formatMoney(totals.profit)],
+          ["Lucro líquido", formatMoney(totals.netProfit)],
+          ["Margem bruta", formatPercent(totals.margin)],
+          ["Margem líquida", formatPercent(totals.netMargin)],
         ].map(([label, value]) => (
           <div className="col-6 col-xl-3" key={String(label)}>
             <div
@@ -787,12 +856,7 @@ function AdminVendasContent() {
           </p>
         </div>
 
-        <div
-          className="p-3 border-bottom"
-          style={{
-            background: "#fffaf2",
-          }}
-        >
+        <div className="p-3 border-bottom" style={{ background: "#fffaf2" }}>
           <div className="row g-2 align-items-end">
             <div className="col-12 col-xl-3">
               <label className="form-label">Buscar</label>
@@ -900,6 +964,8 @@ function AdminVendasContent() {
                 <th>Itens</th>
                 <th>Entrega</th>
                 <th>Total</th>
+                <th>Lucro</th>
+                <th>Margem</th>
                 <th>Status</th>
                 <th style={{ width: 90, textAlign: "center" }}>Detalhes</th>
               </tr>
@@ -912,6 +978,11 @@ function AdminVendasContent() {
                 const customerDocument = getCustomerDocument(sale.customer);
                 const isUpdatingThisSale = updatingSaleId === sale.id;
 
+                const productsTotal = calculateSaleProductsTotal(sale);
+                const productsCost = calculateSaleCost(sale);
+                const profit = calculateSaleProfit(sale);
+                const margin = calculateSaleMargin(sale);
+
                 const canBuyLabel =
                   sale.status === "pronto_envio" &&
                   !sale.melhorEnvioOrderId &&
@@ -922,7 +993,6 @@ function AdminVendasContent() {
                     <tr key={sale.id}>
                       <td>
                         <strong>#{sale.id.slice(0, 8)}</strong>
-
                         <div style={{ fontSize: 12, color: theme.brownSoft }}>
                           {sale.mercadoPagoPreferenceId
                             ? `MP: ${sale.mercadoPagoPreferenceId}`
@@ -938,11 +1008,9 @@ function AdminVendasContent() {
                         <strong>
                           {sale.customer?.name || "Cliente não informado"}
                         </strong>
-
                         <div style={{ fontSize: 12, color: theme.brownSoft }}>
                           {sale.customer?.email || "E-mail não informado"}
                         </div>
-
                         <div style={{ fontSize: 12, color: theme.brownSoft }}>
                           {sale.customer?.phone || "Telefone não informado"}
                         </div>
@@ -956,6 +1024,37 @@ function AdminVendasContent() {
 
                       <td>
                         <strong>{formatMoney(sale.total || 0)}</strong>
+                        <div style={{ fontSize: 12, color: theme.brownSoft }}>
+                          Produtos: {formatMoney(productsTotal)}
+                        </div>
+                      </td>
+
+                      <td>
+                        <strong
+                          style={{
+                            color: profit >= 0 ? "#198754" : "#dc3545",
+                          }}
+                        >
+                          {formatMoney(profit)}
+                        </strong>
+                        <div style={{ fontSize: 12, color: theme.brownSoft }}>
+                          Custo: {formatMoney(productsCost)}
+                        </div>
+                      </td>
+
+                      <td>
+                        <span
+                          className="badge"
+                          style={{
+                            background: margin >= 50 ? "#d1e7dd" : "#fff3cd",
+                            color: margin >= 50 ? "#0f5132" : "#664d03",
+                            borderRadius: 999,
+                            padding: "7px 10px",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {formatPercent(margin)}
+                        </span>
                       </td>
 
                       <td style={{ minWidth: 220 }}>
@@ -1015,44 +1114,16 @@ function AdminVendasContent() {
 
                     {isOpen && (
                       <tr>
-                        <td colSpan={8} style={{ background: "#fffaf2" }}>
+                        <td colSpan={10} style={{ background: "#fffaf2" }}>
                           <div id={`sale-print-${sale.id}`} style={{ padding: 18 }}>
                             <div className="row g-3 mb-3">
-                              <InfoItem
-                                label="ID completo do pedido"
-                                value={`#${sale.id}`}
-                              />
-
-                              <InfoItem
-                                label="ID do usuário"
-                                value={text(sale.userId)}
-                              />
-
-                              <InfoItem
-                                label="Status"
-                                value={statusLabel(sale.status)}
-                              />
-
-                              <InfoItem
-                                label="Criado em"
-                                value={formatDate(sale.createdAt)}
-                              />
-
-                              <InfoItem
-                                label="Atualizado em"
-                                value={formatDate(sale.updatedAt)}
-                              />
-
-                              <InfoItem
-                                label="Tipo de entrega"
-                                value={deliveryTypeLabel(sale.deliveryType)}
-                              />
-
-                              <InfoItem
-                                label="Nome"
-                                value={text(sale.customer?.name)}
-                              />
-
+                              <InfoItem label="ID completo do pedido" value={`#${sale.id}`} />
+                              <InfoItem label="ID do usuário" value={text(sale.userId)} />
+                              <InfoItem label="Status" value={statusLabel(sale.status)} />
+                              <InfoItem label="Criado em" value={formatDate(sale.createdAt)} />
+                              <InfoItem label="Atualizado em" value={formatDate(sale.updatedAt)} />
+                              <InfoItem label="Tipo de entrega" value={deliveryTypeLabel(sale.deliveryType)} />
+                              <InfoItem label="Nome" value={text(sale.customer?.name)} />
                               <InfoItem
                                 label="CPF/CNPJ"
                                 value={
@@ -1061,52 +1132,15 @@ function AdminVendasContent() {
                                     : "Não informado"
                                 }
                               />
-
-                              <InfoItem
-                                label="E-mail"
-                                value={text(sale.customer?.email)}
-                              />
-
-                              <InfoItem
-                                label="Telefone/WhatsApp"
-                                value={text(sale.customer?.phone)}
-                              />
-
-                              <InfoItem
-                                label="CEP"
-                                value={text(sale.customer?.cep)}
-                              />
-
-                              <InfoItem
-                                label="Rua/Avenida"
-                                value={text(sale.customer?.address)}
-                              />
-
-                              <InfoItem
-                                label="Número"
-                                value={text(sale.customer?.number)}
-                              />
-
-                              <InfoItem
-                                label="Complemento"
-                                value={text(sale.customer?.complement)}
-                              />
-
-                              <InfoItem
-                                label="Bairro"
-                                value={text(sale.customer?.district)}
-                              />
-
-                              <InfoItem
-                                label="Cidade"
-                                value={text(sale.customer?.city)}
-                              />
-
-                              <InfoItem
-                                label="Estado"
-                                value={text(sale.customer?.state)}
-                              />
-
+                              <InfoItem label="E-mail" value={text(sale.customer?.email)} />
+                              <InfoItem label="Telefone/WhatsApp" value={text(sale.customer?.phone)} />
+                              <InfoItem label="CEP" value={text(sale.customer?.cep)} />
+                              <InfoItem label="Rua/Avenida" value={text(sale.customer?.address)} />
+                              <InfoItem label="Número" value={text(sale.customer?.number)} />
+                              <InfoItem label="Complemento" value={text(sale.customer?.complement)} />
+                              <InfoItem label="Bairro" value={text(sale.customer?.district)} />
+                              <InfoItem label="Cidade" value={text(sale.customer?.city)} />
+                              <InfoItem label="Estado" value={text(sale.customer?.state)} />
                               <InfoItem
                                 label="Endereço salvo"
                                 value={
@@ -1115,31 +1149,11 @@ function AdminVendasContent() {
                                     : "Não informado"
                                 }
                               />
-
-                              <InfoItem
-                                label="Transportadora"
-                                value={text(sale.shippingOption?.company)}
-                              />
-
-                              <InfoItem
-                                label="Serviço"
-                                value={text(sale.shippingOption?.name)}
-                              />
-
-                              <InfoItem
-                                label="Valor do frete"
-                                value={formatMoney(sale.deliveryPrice || 0)}
-                              />
-
-                              <InfoItem
-                                label="ID Melhor Envio"
-                                value={text(sale.melhorEnvioOrderId)}
-                              />
-
-                              <InfoItem
-                                label="Código de rastreio"
-                                value={text(sale.trackingCode)}
-                              />
+                              <InfoItem label="Transportadora" value={text(sale.shippingOption?.company)} />
+                              <InfoItem label="Serviço" value={text(sale.shippingOption?.name)} />
+                              <InfoItem label="Valor do frete" value={formatMoney(sale.deliveryPrice || 0)} />
+                              <InfoItem label="ID Melhor Envio" value={text(sale.melhorEnvioOrderId)} />
+                              <InfoItem label="Código de rastreio" value={text(sale.trackingCode)} />
                             </div>
 
                             <div
@@ -1155,60 +1169,87 @@ function AdminVendasContent() {
                               </h6>
 
                               <div className="d-grid gap-2">
-                                {sale.items?.map((item) => (
-                                  <div
-                                    key={item.id}
-                                    className="d-flex flex-wrap align-items-center gap-3 p-2"
-                                    style={{
-                                      background: "#fffaf2",
-                                      borderRadius: 16,
-                                      border: `1px solid ${theme.border}`,
-                                    }}
-                                  >
-                                    <img
-                                      src={item.images?.[0] || ""}
-                                      alt={item.name}
+                                {sale.items?.map((item) => {
+                                  const quantity = Number(item.quantity || 1);
+                                  const itemCost = Number(item.costPrice || 0);
+                                  const itemPrice = Number(item.price || 0);
+                                  const itemProfit =
+                                    (itemPrice - itemCost) * quantity;
+                                  const itemMargin =
+                                    itemPrice > 0
+                                      ? ((itemPrice - itemCost) / itemPrice) * 100
+                                      : 0;
+
+                                  return (
+                                    <div
+                                      key={item.id}
+                                      className="d-flex flex-wrap align-items-center gap-3 p-2"
                                       style={{
-                                        width: 70,
-                                        height: 85,
-                                        objectFit: "contain",
-                                        background: "#f3eadf",
-                                        borderRadius: 12,
+                                        background: "#fffaf2",
+                                        borderRadius: 16,
+                                        border: `1px solid ${theme.border}`,
                                       }}
-                                    />
-
-                                    <div className="flex-grow-1">
-                                      <strong>{item.name}</strong>
-
-                                      <div
+                                    >
+                                      <img
+                                        src={item.images?.[0] || ""}
+                                        alt={item.name}
                                         style={{
-                                          fontSize: 13,
-                                          color: theme.brownSoft,
+                                          width: 70,
+                                          height: 85,
+                                          objectFit: "contain",
+                                          background: "#f3eadf",
+                                          borderRadius: 12,
                                         }}
-                                      >
-                                        {[item.category, item.size, item.color]
-                                          .filter(Boolean)
-                                          .join(" • ")}
+                                      />
+
+                                      <div className="flex-grow-1">
+                                        <strong>{item.name}</strong>
+
+                                        <div
+                                          style={{
+                                            fontSize: 13,
+                                            color: theme.brownSoft,
+                                          }}
+                                        >
+                                          {[item.category, item.size, item.color]
+                                            .filter(Boolean)
+                                            .join(" • ")}
+                                        </div>
+
+                                        <div style={{ fontSize: 13 }}>
+                                          Quantidade: {quantity}
+                                        </div>
+
+                                        <div style={{ fontSize: 13 }}>
+                                          Custo unitário: {formatMoney(itemCost)}
+                                        </div>
+
+                                        <div style={{ fontSize: 13 }}>
+                                          Venda unitária: {formatMoney(itemPrice)}
+                                        </div>
+
+                                        <div style={{ fontSize: 13 }}>
+                                          Lucro:{" "}
+                                          <strong
+                                            style={{
+                                              color:
+                                                itemProfit >= 0
+                                                  ? "#198754"
+                                                  : "#dc3545",
+                                            }}
+                                          >
+                                            {formatMoney(itemProfit)}
+                                          </strong>{" "}
+                                          • Margem: {formatPercent(itemMargin)}
+                                        </div>
                                       </div>
 
-                                      <div style={{ fontSize: 13 }}>
-                                        Quantidade: {item.quantity || 1}
-                                      </div>
-
-                                      <div style={{ fontSize: 13 }}>
-                                        Valor unitário:{" "}
-                                        {formatMoney(item.price || 0)}
-                                      </div>
+                                      <strong>
+                                        {formatMoney(itemPrice * quantity)}
+                                      </strong>
                                     </div>
-
-                                    <strong>
-                                      {formatMoney(
-                                        Number(item.price || 0) *
-                                          Number(item.quantity || 1),
-                                      )}
-                                    </strong>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             </div>
 
@@ -1230,9 +1271,47 @@ function AdminVendasContent() {
                               </p>
 
                               <p className="d-flex justify-content-between mb-1">
-                                <span>Frete</span>
-                                <strong>
-                                  {formatMoney(sale.deliveryPrice || 0)}
+                                <span>Custo dos produtos</span>
+                                <strong>{formatMoney(productsCost)}</strong>
+                              </p>
+
+                              <p className="d-flex justify-content-between mb-1">
+                                <span>Lucro bruto dos produtos</span>
+                                <strong
+                                  style={{
+                                    color: profit >= 0 ? "#198754" : "#dc3545",
+                                  }}
+                                >
+                                  {formatMoney(profit)}
+                                </strong>
+                              </p>
+
+                              <p className="d-flex justify-content-between mb-1">
+                                <span>Margem dos produtos</span>
+                                <strong>{formatPercent(margin)}</strong>
+                              </p>
+
+                              <p className="d-flex justify-content-between mb-1">
+                                <span>Frete recebido</span>
+                                <strong>{formatMoney(calculateSaleShippingRevenue(sale))}</strong>
+                              </p>
+
+                              <p className="d-flex justify-content-between mb-1">
+                                <span>Custo de frete pago pela loja</span>
+                                <strong>{formatMoney(calculateSaleShippingCostPaidByStore(sale))}</strong>
+                              </p>
+
+                              <p className="d-flex justify-content-between mb-1">
+                                <span>Lucro líquido estimado</span>
+                                <strong
+                                  style={{
+                                    color:
+                                      calculateSaleNetProfit(sale) >= 0
+                                        ? "#198754"
+                                        : "#dc3545",
+                                  }}
+                                >
+                                  {formatMoney(calculateSaleNetProfit(sale))}
                                 </strong>
                               </p>
 
@@ -1260,9 +1339,7 @@ function AdminVendasContent() {
 
                               <input
                                 className="form-control mb-3"
-                                value={
-                                  tracking[sale.id] ?? sale.trackingCode ?? ""
-                                }
+                                value={tracking[sale.id] ?? sale.trackingCode ?? ""}
                                 disabled={isUpdatingThisSale}
                                 onChange={(event) =>
                                   setTracking((prev) => ({
@@ -1293,9 +1370,7 @@ function AdminVendasContent() {
                                     borderRadius: 999,
                                     opacity: isUpdatingThisSale ? 0.7 : 1,
                                   }}
-                                  onClick={() =>
-                                    changeStatus(sale.id, sale.status)
-                                  }
+                                  onClick={() => changeStatus(sale.id, sale.status)}
                                 >
                                   {isUpdatingThisSale
                                     ? "Salvando..."
@@ -1339,9 +1414,7 @@ function AdminVendasContent() {
                                       !canBuyLabel
                                         ? 0.7
                                         : 1,
-                                    cursor: canBuyLabel
-                                      ? "pointer"
-                                      : "not-allowed",
+                                    cursor: canBuyLabel ? "pointer" : "not-allowed",
                                   }}
                                   onClick={() => openGenerateLabelModal(sale)}
                                 >
@@ -1400,7 +1473,7 @@ function AdminVendasContent() {
 
               {!filteredSales.length && (
                 <tr>
-                  <td colSpan={8} className="text-center py-4">
+                  <td colSpan={10} className="text-center py-4">
                     Nenhuma venda encontrada com os filtros selecionados.
                   </td>
                 </tr>

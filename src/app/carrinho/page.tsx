@@ -126,6 +126,7 @@ function CarrinhoContent() {
       ? Number(selectedShipping.price || 0)
       : 0;
 
+
   const total = subtotal + deliveryPrice;
 
   async function loadAddresses(userId: string) {
@@ -570,6 +571,7 @@ function CarrinhoContent() {
         subtotal,
         deliveryType,
         deliveryPrice,
+        total,
         shippingOption: selectedShipping,
         paymentUrl: "",
         mercadoPagoPreferenceId: "",
@@ -1039,7 +1041,7 @@ function CarrinhoContent() {
               </p>
 
               <p className="d-flex justify-content-between">
-                <span>Entrega</span>
+                <span>Entrega/Frete</span>
                 <strong>
                   {deliveryType === "envio" && !selectedShipping
                     ? "Calcule o frete"
@@ -1047,8 +1049,11 @@ function CarrinhoContent() {
                 </strong>
               </p>
 
-              <h4 className="d-flex justify-content-between">
-                <span>Total</span>
+
+              <h4 className="d-flex justify-content-between mt-3 pt-3"
+                style={{ borderTop: `1px solid ${theme.border}` }}
+              >
+                <span>Total da venda</span>
                 <strong>{formatMoney(total)}</strong>
               </h4>
 

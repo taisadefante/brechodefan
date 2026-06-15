@@ -16,6 +16,8 @@ type ProductForm = Omit<Product, "id"> & {
   shippingProfile?: ShippingProfile | "";
   type?: string;
   subtype?: string;
+  costPrice?: number;
+  desiredMargin?: number;
 };
 
 const CROP_PREVIEW_SIZE = 520;
@@ -56,6 +58,8 @@ const emptyForm: ProductForm = {
   name: "",
   description: "",
   price: 0,
+  costPrice: 0,
+  desiredMargin: 0,
   category: "",
   type: "",
   subtype: "",
@@ -114,8 +118,16 @@ function uniqueNames(names: string[]) {
 function ensureOption(options: string[], value: string) {
   const exists = options.some(
     (item) =>
-      item.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() ===
-      value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim(),
+      item
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim() ===
+      value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim(),
   );
 
   return exists ? options : [value, ...options];
@@ -129,6 +141,33 @@ function createInitialCrop(): Crop {
     width: 100,
     height: 100,
   };
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0%";
+
+  return `${value.toFixed(2).replace(".", ",")}%`;
+}
+
+function formatCurrencyPreview(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(Number(value || 0));
+}
+
+function calculateMargin(costPrice: number, salePrice: number) {
+  if (!salePrice || salePrice <= 0) return 0;
+
+  return ((salePrice - costPrice) / salePrice) * 100;
+}
+
+function calculateSalePriceByMargin(costPrice: number, margin: number) {
+  if (!costPrice || costPrice <= 0) return 0;
+  if (!margin || margin <= 0) return costPrice;
+  if (margin >= 100) return costPrice;
+
+  return costPrice / (1 - margin / 100);
 }
 
 export default function ProductModal({
@@ -150,6 +189,8 @@ export default function ProductModal({
           type: currentProduct.type || "",
           subtype: currentProduct.subtype || "",
           age: "",
+          costPrice: Number(currentProduct.costPrice || 0),
+          desiredMargin: Number(currentProduct.desiredMargin || 0),
           shippingProfile:
             currentProduct.shippingProfile || DEFAULT_SHIPPING_PROFILE,
           brand: currentProduct.brand || DEFAULT_BRAND,
@@ -194,6 +235,11 @@ export default function ProductModal({
   const imageRef = useRef<HTMLImageElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
+
+  const costPrice = Number(form.costPrice || 0);
+  const salePrice = Number(form.price || 0);
+  const grossProfit = salePrice - costPrice;
+  const currentMargin = calculateMargin(costPrice, salePrice);
 
   const availableTypes = useMemo(() => {
     if (!form.category) return [];
@@ -258,6 +304,52 @@ export default function ProductModal({
   useEffect(() => {
     loadOptions();
   }, []);
+
+  function handleCostChange(value: number) {
+    const cleanCost = Number(value || 0);
+
+    setForm((prev) => {
+      const margin = Number(prev.desiredMargin || 0);
+
+      if (margin > 0 && margin < 100) {
+        return {
+          ...prev,
+          costPrice: cleanCost,
+          price: Number(calculateSalePriceByMargin(cleanCost, margin).toFixed(2)),
+        };
+      }
+
+      return {
+        ...prev,
+        costPrice: cleanCost,
+      };
+    });
+  }
+
+  function handleSalePriceChange(value: number) {
+    const cleanPrice = Number(value || 0);
+    const margin = calculateMargin(Number(form.costPrice || 0), cleanPrice);
+
+    setForm({
+      ...form,
+      price: cleanPrice,
+      desiredMargin: Number(margin.toFixed(2)),
+    });
+  }
+
+  function handleDesiredMarginChange(value: number) {
+    const cleanMargin = Number(value || 0);
+    const newSalePrice = calculateSalePriceByMargin(
+      Number(form.costPrice || 0),
+      cleanMargin,
+    );
+
+    setForm({
+      ...form,
+      desiredMargin: cleanMargin,
+      price: Number(newSalePrice.toFixed(2)),
+    });
+  }
 
   function onCropImageSelected(files: FileList | null) {
     const file = files?.[0];
@@ -454,7 +546,7 @@ export default function ProductModal({
     }
 
     if (!Number(form.price || 0)) {
-      alert("Informe o preço do produto.");
+      alert("Informe o valor de venda do produto.");
       return;
     }
 
@@ -487,6 +579,8 @@ export default function ProductModal({
           age: "",
           images: finalImages,
           price: Number(form.price || 0),
+          costPrice: Number(form.costPrice || 0),
+          desiredMargin: Number(form.desiredMargin || 0),
           stock: Number(form.stock || 1),
           brand: form.brand || DEFAULT_BRAND,
           condition: form.condition || DEFAULT_CONDITION,
@@ -584,7 +678,7 @@ export default function ProductModal({
               </h3>
 
               <p className="mb-0" style={{ color: theme.brownSoft }}>
-                Cadastre categoria, tipo, subtipo e informações completas da peça.
+                Cadastre categoria, preço, custo, margem e informações completas da peça.
               </p>
             </div>
 
@@ -611,7 +705,7 @@ export default function ProductModal({
             </div>
 
             <div className="col-md-4">
-              <label className="form-label">Preço</label>
+              <label className="form-label">Valor de venda</label>
 
               <input
                 className="form-control"
@@ -620,9 +714,57 @@ export default function ProductModal({
                 min="0"
                 value={form.price}
                 onChange={(e) =>
-                  setForm({ ...form, price: Number(e.target.value) })
+                  handleSalePriceChange(Number(e.target.value || 0))
                 }
               />
+            </div>
+
+            <div className="col-md-4">
+              <label className="form-label">Custo do produto</label>
+
+              <input
+                className="form-control"
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.costPrice || 0}
+                onChange={(e) => handleCostChange(Number(e.target.value || 0))}
+              />
+            </div>
+
+            <div className="col-md-4">
+              <label className="form-label">Margem desejada (%)</label>
+
+              <input
+                className="form-control"
+                type="number"
+                step="0.01"
+                min="0"
+                max="99.99"
+                value={form.desiredMargin || 0}
+                onChange={(e) =>
+                  handleDesiredMarginChange(Number(e.target.value || 0))
+                }
+              />
+            </div>
+
+            <div className="col-md-4">
+              <label className="form-label">Resultado</label>
+
+              <div
+                style={{
+                  background: "#fff",
+                  borderRadius: 14,
+                  border: `1px solid ${theme.border}`,
+                  padding: "8px 12px",
+                  minHeight: 38,
+                  fontSize: 13,
+                }}
+              >
+                <strong>Lucro:</strong> {formatCurrencyPreview(grossProfit)}
+                <br />
+                <strong>Margem atual:</strong> {formatPercent(currentMargin)}
+              </div>
             </div>
 
             <div className="col-12">

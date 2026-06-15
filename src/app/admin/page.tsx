@@ -39,6 +39,34 @@ const statuses: SaleStatus[] = [
   "cancelado",
 ];
 
+
+function calculateProductsTotal(sale: Sale) {
+  return (sale.items || []).reduce((sum, item) => {
+    return sum + Number(item.price || 0) * Number(item.quantity || 1);
+  }, 0);
+}
+
+function calculateProductsCost(sale: Sale) {
+  return (sale.items || []).reduce((sum, item) => {
+    return sum + Number((item as { costPrice?: number }).costPrice || 0) * Number(item.quantity || 1);
+  }, 0);
+}
+
+function calculateShippingRevenue(sale: Sale) {
+  const data = sale as Sale & { deliveryPrice?: number; shippingRevenue?: number };
+  return Number(data.deliveryPrice || data.shippingRevenue || 0);
+}
+
+function calculateShippingCostPaidByStore(sale: Sale) {
+  const data = sale as Sale & { shippingCostPaidByStore?: number; shippingCost?: number };
+  return Number(data.shippingCostPaidByStore || data.shippingCost || 0);
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0,00%";
+  return `${value.toFixed(2).replace(".", ",")}%`;
+}
+
 function formatDate(value?: number | string | null) {
   if (!value) return "Não informado";
 
@@ -208,6 +236,31 @@ function AdminContent() {
       0,
     );
 
+    const productsRevenue = validSales.reduce(
+      (sum, sale) => sum + calculateProductsTotal(sale),
+      0,
+    );
+
+    const shippingRevenue = validSales.reduce(
+      (sum, sale) => sum + calculateShippingRevenue(sale),
+      0,
+    );
+
+    const productsCost = validSales.reduce(
+      (sum, sale) => sum + calculateProductsCost(sale),
+      0,
+    );
+
+    const shippingCostPaidByStore = validSales.reduce(
+      (sum, sale) => sum + calculateShippingCostPaidByStore(sale),
+      0,
+    );
+
+    const grossProfit = productsRevenue - productsCost;
+    const netProfit = grossProfit - shippingCostPaidByStore;
+    const grossMargin = productsRevenue > 0 ? (grossProfit / productsRevenue) * 100 : 0;
+    const netMargin = productsRevenue > 0 ? (netProfit / productsRevenue) * 100 : 0;
+
     const paidRevenue = paidSales.reduce(
       (sum, sale) => sum + Number(sale.total || 0),
       0,
@@ -222,6 +275,14 @@ function AdminContent() {
       preparingSales: preparingSales.length,
       cancelRequests: cancelRequests.length,
       periodRevenue,
+      productsRevenue,
+      shippingRevenue,
+      productsCost,
+      shippingCostPaidByStore,
+      grossProfit,
+      netProfit,
+      grossMargin,
+      netMargin,
       paidRevenue,
       ticket,
       availableProducts: availableProducts.length,
@@ -254,6 +315,14 @@ function AdminContent() {
 
     if (dashboard.lowStockProducts > 0) {
       alerts.push(`${dashboard.lowStockProducts} produto(s) com estoque baixo.`);
+    }
+
+    if (dashboard.netProfit < 0 && dashboard.periodSales > 0) {
+      alerts.push("Atenção: lucro líquido negativo no período selecionado.");
+    }
+
+    if (dashboard.grossMargin > 0 && dashboard.grossMargin < 30) {
+      alerts.push("Margem bruta abaixo de 30%. Revise preço de venda e custo.");
     }
 
     if (!alerts.length) {
@@ -466,7 +535,14 @@ function AdminContent() {
           ["Pagas", dashboard.paidSales, <TrendingUp size={22} key="b" />],
           ["Aguardando pagamento", dashboard.pendingSales, <AlertTriangle size={22} key="c" />],
           ["Em separação/envio", dashboard.preparingSales, <Package size={22} key="d" />],
-          ["Faturamento no período", formatMoney(dashboard.periodRevenue), <TrendingUp size={22} key="e" />],
+          ["Faturamento com frete", formatMoney(dashboard.periodRevenue), <TrendingUp size={22} key="e" />],
+          ["Venda produtos", formatMoney(dashboard.productsRevenue), <TrendingUp size={22} key="ep" />],
+          ["Frete recebido", formatMoney(dashboard.shippingRevenue), <TrendingUp size={22} key="fr" />],
+          ["Custo produtos", formatMoney(dashboard.productsCost), <Package size={22} key="cp" />],
+          ["Lucro bruto", formatMoney(dashboard.grossProfit), <TrendingUp size={22} key="lb" />],
+          ["Lucro líquido", formatMoney(dashboard.netProfit), <TrendingUp size={22} key="ll" />],
+          ["Margem bruta", formatPercent(dashboard.grossMargin), <TrendingUp size={22} key="mb" />],
+          ["Margem líquida", formatPercent(dashboard.netMargin), <TrendingUp size={22} key="ml" />],
           ["Receita paga", formatMoney(dashboard.paidRevenue), <TrendingUp size={22} key="f" />],
           ["Ticket médio", formatMoney(dashboard.ticket), <ShoppingBag size={22} key="g" />],
           ["Produtos disponíveis", dashboard.availableProducts, <Package size={22} key="h" />],

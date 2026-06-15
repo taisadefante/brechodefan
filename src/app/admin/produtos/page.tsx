@@ -44,6 +44,27 @@ function productStatusLabel(status: Product["status"]) {
   return status;
 }
 
+function calculateProfit(product: Product) {
+  const costPrice = Number(product.costPrice || 0);
+  const salePrice = Number(product.price || 0);
+  return salePrice - costPrice;
+}
+
+function calculateMargin(product: Product) {
+  const salePrice = Number(product.price || 0);
+  const profit = calculateProfit(product);
+
+  if (salePrice <= 0) return 0;
+
+  return (profit / salePrice) * 100;
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0,00%";
+
+  return `${value.toFixed(2).replace(".", ",")}%`;
+}
+
 function AdminProdutosContent() {
   const { user, loading, isAdmin, login } = useAuth();
 
@@ -201,11 +222,28 @@ function AdminProdutosContent() {
       return sum + Number(product.price || 0) * Number(product.stock || 0);
     }, 0);
 
+    const stockCostValue = products.reduce((sum, product) => {
+      return sum + Number(product.costPrice || 0) * Number(product.stock || 0);
+    }, 0);
+
+    const potentialProfit = stockValue - stockCostValue;
+
     const availableStockValue = products
       .filter((product) => product.status === "disponivel")
       .reduce((sum, product) => {
         return sum + Number(product.price || 0) * Number(product.stock || 0);
       }, 0);
+
+    const availableStockCostValue = products
+      .filter((product) => product.status === "disponivel")
+      .reduce((sum, product) => {
+        return sum + Number(product.costPrice || 0) * Number(product.stock || 0);
+      }, 0);
+
+    const availableProfit = availableStockValue - availableStockCostValue;
+
+    const averageMargin =
+      stockValue > 0 ? (potentialProfit / stockValue) * 100 : 0;
 
     return {
       active: products.filter((product) => product.status === "disponivel")
@@ -217,7 +255,11 @@ function AdminProdutosContent() {
         .length,
       totalStock,
       stockValue,
+      stockCostValue,
+      potentialProfit,
       availableStockValue,
+      availableProfit,
+      averageMargin,
       revenue: monthSales.reduce(
         (sum, sale) => sum + Number(sale.total || 0),
         0,
@@ -340,7 +382,7 @@ function AdminProdutosContent() {
             <h1 className="fw-bold mb-1">Produtos</h1>
 
             <p className="mb-0" style={{ color: theme.brownSoft }}>
-              Cadastre, edite e altere o status direto na lista.
+              Cadastre, edite, acompanhe custo, venda, lucro e margem.
             </p>
           </div>
 
@@ -385,8 +427,12 @@ function AdminProdutosContent() {
           ["Vendidos", stats.sold],
           ["Arquivados", stats.archived],
           ["Estoque total", stats.totalStock],
-          ["Valor total cadastrado", formatMoney(stats.stockValue)],
+          ["Valor venda estoque", formatMoney(stats.stockValue)],
+          ["Valor custo estoque", formatMoney(stats.stockCostValue)],
+          ["Lucro potencial", formatMoney(stats.potentialProfit)],
           ["Valor disponível", formatMoney(stats.availableStockValue)],
+          ["Lucro disponível", formatMoney(stats.availableProfit)],
+          ["Margem média", formatPercent(stats.averageMargin)],
           ["Faturamento mensal", formatMoney(stats.revenue)],
         ].map(([label, value]) => (
           <div className="col-6 col-md-4 col-xl-3" key={String(label)}>
@@ -442,9 +488,12 @@ function AdminProdutosContent() {
                 <th>Categoria</th>
                 <th>Tipo</th>
                 <th>Subtipo</th>
-<th>Tamanho / Idade</th>
+                <th>Tamanho / Idade</th>
                 <th>Sexo</th>
-                <th>Preço</th>
+                <th>Custo</th>
+                <th>Venda</th>
+                <th>Lucro</th>
+                <th>Margem</th>
                 <th>Estoque</th>
                 <th>Status</th>
                 <th style={{ width: 110, textAlign: "center" }}>Ações</th>
@@ -454,6 +503,10 @@ function AdminProdutosContent() {
             <tbody>
               {paginatedProducts.map((product) => {
                 const isUpdating = updatingProductId === product.id;
+                const costPrice = Number(product.costPrice || 0);
+                const salePrice = Number(product.price || 0);
+                const profit = salePrice - costPrice;
+                const margin = salePrice > 0 ? (profit / salePrice) * 100 : 0;
 
                 return (
                   <tr key={product.id}>
@@ -511,11 +564,38 @@ function AdminProdutosContent() {
                     <td>{product.category || "Não informado"}</td>
                     <td>{product.type || "Não informado"}</td>
                     <td>{product.subtype || "Não informado"}</td>
-<td>{product.size || product.age || "Não informado"}</td>
+                    <td>{product.size || product.age || "Não informado"}</td>
                     <td>{product.gender || "Não informado"}</td>
 
+                    <td>{formatMoney(costPrice)}</td>
+
                     <td>
-                      <strong>{formatMoney(product.price)}</strong>
+                      <strong>{formatMoney(salePrice)}</strong>
+                    </td>
+
+                    <td>
+                      <strong
+                        style={{
+                          color: profit >= 0 ? "#198754" : "#dc3545",
+                        }}
+                      >
+                        {formatMoney(profit)}
+                      </strong>
+                    </td>
+
+                    <td>
+                      <span
+                        className="badge"
+                        style={{
+                          background: margin >= 50 ? "#d1e7dd" : "#fff3cd",
+                          color: margin >= 50 ? "#0f5132" : "#664d03",
+                          borderRadius: 999,
+                          padding: "7px 10px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {formatPercent(margin)}
+                      </span>
                     </td>
 
                     <td>
@@ -593,7 +673,7 @@ function AdminProdutosContent() {
 
               {!paginatedProducts.length && (
                 <tr>
-                  <td colSpan={10} className="text-center py-4">
+                  <td colSpan={13} className="text-center py-4">
                     Nenhum produto encontrado com esses filtros.
                   </td>
                 </tr>
