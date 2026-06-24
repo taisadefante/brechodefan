@@ -770,6 +770,59 @@ export async function markReturnReceivedAndCancelSale(id: string): Promise<void>
   });
 }
 
+
+export async function updateSaleReverseShippingLabel(
+  id: string,
+  data: {
+    melhorEnvioReverseOrderId?: string;
+    melhorEnvioReverseCode?: string;
+    melhorEnvioReversePrintUrl?: string;
+    melhorEnvioReverseCreatedAt?: number;
+    returnInstructions?: string;
+  },
+): Promise<void> {
+  await updateDoc(doc(db, "sales", id), {
+    status: "aguardando_retorno",
+    melhorEnvioReverseOrderId: data.melhorEnvioReverseOrderId || "",
+    melhorEnvioReverseCode: data.melhorEnvioReverseCode || "",
+    melhorEnvioReversePrintUrl: data.melhorEnvioReversePrintUrl || "",
+    melhorEnvioReverseCreatedAt:
+      data.melhorEnvioReverseCreatedAt || Date.now(),
+    returnInstructions: data.returnInstructions || "",
+    reverseStatus: "reversa_gerada",
+    reverseRequested: true,
+    reverseRequestedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+}
+
+export async function receiveReturnedSaleProducts(id: string): Promise<void> {
+  const saleRef = doc(db, "sales", id);
+  const saleSnap = await getDoc(saleRef);
+
+  if (!saleSnap.exists()) return;
+
+  const sale = {
+    id: saleSnap.id,
+    ...saleSnap.data(),
+  } as SaleWithInventory;
+
+  await restoreStockFromSale({
+    ...sale,
+    inventoryRestored: false,
+  });
+
+  await updateDoc(saleRef, {
+    status: "cancelado",
+    returnReceivedAt: Date.now(),
+    canceledAt: Date.now(),
+    reverseStatus: "produto_recebido",
+    inventoryProcessed: false,
+    inventoryRestored: true,
+    updatedAt: Date.now(),
+  });
+}
+
 export async function updateSaleReverseStatus(
   id: string,
   reverseStatus: string,
