@@ -28,6 +28,7 @@ export type Product = {
   description: string;
   price: number;
   costPrice?: number;
+  desiredMargin?: number;
   category: string;
   type?: string;
   subtype?: string;
@@ -154,6 +155,11 @@ export type Sale = {
   melhorEnvioTrackingCode?: string;
   melhorEnvioStatus?: string;
 
+  melhorEnvioReverseOrderId?: string;
+  melhorEnvioReverseCode?: string;
+  melhorEnvioReversePrintUrl?: string;
+  melhorEnvioReverseCreatedAt?: number;
+
   reverseRequested?: boolean;
   reverseReason?: string;
   reverseRequestedAt?: number;
@@ -163,6 +169,7 @@ export type Sale = {
   reverseTrackingCode?: string;
   reverseStatus?: string;
   reverseInstructions?: string;
+  returnInstructions?: string;
   returnReceivedAt?: number;
 
   inventoryProcessed?: boolean;
