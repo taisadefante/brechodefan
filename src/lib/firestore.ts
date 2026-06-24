@@ -45,6 +45,28 @@ function saleUsesStock(status: SaleStatus) {
   ].includes(status);
 }
 
+function saleAlreadyShipped(status?: SaleStatus) {
+  return [
+    "enviado",
+    "entregue",
+    "devolucao_aprovada",
+    "aguardando_retorno",
+    "produto_recebido",
+  ].includes(status || "aguardando_pagamento");
+}
+
+function calculateProductsCost(items: CartItem[]) {
+  return (items || []).reduce((sum, item) => {
+    return sum + Number(item.costPrice || 0) * getItemQuantity(item);
+  }, 0);
+}
+
+function calculateProductsRevenue(items: CartItem[]) {
+  return (items || []).reduce((sum, item) => {
+    return sum + Number(item.price || 0) * getItemQuantity(item);
+  }, 0);
+}
+
 function getItemQuantity(item: CartItem) {
   return Math.max(Number(item.quantity || 1), 1);
 }
@@ -467,6 +489,7 @@ export async function createSale(params: {
   shippingOption?: ShippingOption | null;
   paymentUrl?: string;
   mercadoPagoPreferenceId?: string;
+  total?: number;
 }): Promise<string> {
   const total = params.subtotal + params.deliveryPrice;
 
@@ -480,11 +503,19 @@ export async function createSale(params: {
     deliveryPrice: params.deliveryPrice,
     shippingOption: params.shippingOption || null,
     total,
+    productsRevenue: calculateProductsRevenue(params.items),
+    productsCost: calculateProductsCost(params.items),
+    shippingRevenue: params.deliveryPrice,
+    shippingCostPaidByStore: 0,
+    shippingCost: 0,
+    grossProfit: calculateProductsRevenue(params.items) - calculateProductsCost(params.items),
+    netProfit: calculateProductsRevenue(params.items) - calculateProductsCost(params.items),
     status: "aguardando_pagamento",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     paymentUrl: params.paymentUrl || "",
     mercadoPagoPreferenceId: params.mercadoPagoPreferenceId || "",
+    paymentGeneratedAt: params.paymentUrl ? Date.now() : 0,
     melhorEnvioOrderId: "",
     melhorEnvioPrintUrl: "",
     trackingCode: "",
@@ -548,15 +579,20 @@ export async function updateSaleStatus(
   const previousStatus = sale.status;
 
   if (status === "cancelado") {
-    await restoreStockFromSale(sale);
+    const shouldRestoreNow = !saleAlreadyShipped(previousStatus) || Boolean(sale.returnReceivedAt);
+
+    if (shouldRestoreNow) {
+      await restoreStockFromSale(sale);
+    }
 
     await updateDoc(saleRef, {
       status: "cancelado",
       trackingCode: trackingCode || sale.trackingCode || "",
       cancelApproved: true,
       cancelApprovedAt: Date.now(),
-      inventoryProcessed: false,
-      inventoryRestored: true,
+      canceledAt: Date.now(),
+      inventoryProcessed: shouldRestoreNow ? false : sale.inventoryProcessed || false,
+      inventoryRestored: shouldRestoreNow ? true : sale.inventoryRestored || false,
       updatedAt: Date.now(),
     });
 
@@ -584,6 +620,23 @@ export async function updateSaleStatus(
     trackingCode: trackingCode || sale.trackingCode || "",
     inventoryProcessed: saleUsesStock(status),
     inventoryRestored: false,
+    updatedAt: Date.now(),
+  });
+}
+
+
+export async function updateSalePaymentData(
+  id: string,
+  data: {
+    paymentUrl?: string;
+    mercadoPagoPreferenceId?: string;
+    paymentGeneratedAt?: number;
+  },
+): Promise<void> {
+  await updateDoc(doc(db, "sales", id), {
+    paymentUrl: data.paymentUrl || "",
+    mercadoPagoPreferenceId: data.mercadoPagoPreferenceId || "",
+    paymentGeneratedAt: data.paymentGeneratedAt || Date.now(),
     updatedAt: Date.now(),
   });
 }
@@ -622,6 +675,7 @@ export async function requestCancelSale(
     status: "cancelamento_solicitado",
     cancelRequested: true,
     cancelReason: reason,
+    cancelRequestedAt: Date.now(),
     updatedAt: Date.now(),
   });
 }
@@ -637,14 +691,91 @@ export async function approveCancelSale(id: string): Promise<void> {
     ...saleSnap.data(),
   } as SaleWithInventory;
 
+  const shouldRestoreNow = !saleAlreadyShipped(sale.status);
+
+  if (shouldRestoreNow) {
+    await restoreStockFromSale(sale);
+
+    await updateDoc(saleRef, {
+      status: "cancelado",
+      cancelApproved: true,
+      cancelApprovedAt: Date.now(),
+      canceledAt: Date.now(),
+      inventoryProcessed: false,
+      inventoryRestored: true,
+      updatedAt: Date.now(),
+    });
+
+    return;
+  }
+
+  await updateDoc(saleRef, {
+    status: "devolucao_aprovada",
+    cancelApproved: true,
+    cancelApprovedAt: Date.now(),
+    reverseRequested: true,
+    reverseRequestedAt: Date.now(),
+    reverseReason: sale.cancelReason || "Cancelamento aprovado após envio.",
+    reverseInstructions:
+      "A devolução foi aprovada. Aguarde o código ou a etiqueta reversa para postar o produto. O estoque só será liberado após o produto retornar e ser conferido pela loja.",
+    updatedAt: Date.now(),
+  });
+}
+
+export async function updateSaleReverseLabel(
+  id: string,
+  data: {
+    reverseOrderId?: string;
+    reversePrintUrl?: string;
+    reverseTrackingCode?: string;
+    reverseStatus?: string;
+    reverseInstructions?: string;
+  },
+): Promise<void> {
+  await updateDoc(doc(db, "sales", id), {
+    status: "aguardando_retorno",
+    reverseApprovedAt: Date.now(),
+    reverseOrderId: data.reverseOrderId || "",
+    reversePrintUrl: data.reversePrintUrl || "",
+    reverseTrackingCode: data.reverseTrackingCode || "",
+    reverseStatus: data.reverseStatus || "reversa_gerada",
+    reverseInstructions:
+      data.reverseInstructions ||
+      "Sua logística reversa foi gerada. Embale o produto com cuidado, cole a etiqueta na embalagem e poste conforme a orientação da transportadora. Depois que a peça chegar e for conferida, o cancelamento será finalizado.",
+    updatedAt: Date.now(),
+  });
+}
+
+export async function markReturnReceivedAndCancelSale(id: string): Promise<void> {
+  const saleRef = doc(db, "sales", id);
+  const saleSnap = await getDoc(saleRef);
+
+  if (!saleSnap.exists()) return;
+
+  const sale = {
+    id: saleSnap.id,
+    ...saleSnap.data(),
+  } as SaleWithInventory;
+
   await restoreStockFromSale(sale);
 
   await updateDoc(saleRef, {
     status: "cancelado",
-    cancelApproved: true,
-    cancelApprovedAt: Date.now(),
+    returnReceivedAt: Date.now(),
+    canceledAt: Date.now(),
+    reverseStatus: "produto_recebido",
     inventoryProcessed: false,
     inventoryRestored: true,
+    updatedAt: Date.now(),
+  });
+}
+
+export async function updateSaleReverseStatus(
+  id: string,
+  reverseStatus: string,
+): Promise<void> {
+  await updateDoc(doc(db, "sales", id), {
+    reverseStatus,
     updatedAt: Date.now(),
   });
 }

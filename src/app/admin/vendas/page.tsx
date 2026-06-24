@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -13,6 +13,8 @@ import {
 import {
   approveCancelSale,
   getAllSales,
+  receiveReturnedSaleProducts,
+  updateSaleReverseShippingLabel,
   updateSaleShippingLabel,
   updateSaleStatus,
 } from "@/lib/firestore";
@@ -42,6 +44,12 @@ type SaleWithDocument = Sale & {
   shippingCost?: number;
   grossProfit?: number;
   netProfit?: number;
+  melhorEnvioReverseOrderId?: string;
+  melhorEnvioReverseCode?: string;
+  melhorEnvioReversePrintUrl?: string;
+  melhorEnvioReverseCreatedAt?: number;
+  returnReceivedAt?: number;
+  returnInstructions?: string;
 };
 
 type ApiResponseData = {
@@ -50,6 +58,8 @@ type ApiResponseData = {
   details?: unknown;
   orderId?: string;
   printUrl?: string;
+  reverseCode?: string;
+  reversePrintUrl?: string;
 };
 
 const statuses: SaleStatus[] = [
@@ -61,6 +71,7 @@ const statuses: SaleStatus[] = [
   "enviado",
   "entregue",
   "cancelamento_solicitado",
+  "aguardando_retorno" as SaleStatus,
   "cancelado",
 ];
 
@@ -247,6 +258,12 @@ function AdminVendasContent() {
   const [saleToGenerateLabel, setSaleToGenerateLabel] =
     useState<SaleWithDocument | null>(null);
   const [generatingLabel, setGeneratingLabel] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [generatingReverse, setGeneratingReverse] = useState<
+    Record<string, boolean>
+  >({});
+  const [receivingReturn, setReceivingReturn] = useState<Record<string, boolean>>(
     {},
   );
 
@@ -496,6 +513,32 @@ function AdminVendasContent() {
     return customer;
   }
 
+  function canGenerateReverseLabel(sale: SaleWithDocument) {
+    const status = String(sale.status || "");
+
+    return (
+      sale.deliveryType === "envio" &&
+      Boolean(sale.shippingOption) &&
+      Boolean(sale.melhorEnvioOrderId || sale.melhorEnvioPrintUrl) &&
+      !sale.melhorEnvioReverseOrderId &&
+      ["enviado", "entregue", "cancelamento_solicitado"].includes(status)
+    );
+  }
+
+  function getReverseInstructions(sale: SaleWithDocument, data: ApiResponseData) {
+    const code = data.reverseCode || "código informado pelo Melhor Envio";
+
+    return [
+      "Sua devolução foi aprovada.",
+      `Código de logística reversa: ${code}.`,
+      "Leve o produto bem embalado até uma agência/ponto autorizado informado pela transportadora.",
+      "Apresente o código no balcão. Se houver link/PDF disponível, imprima e cole a etiqueta na embalagem.",
+      "Guarde o comprovante de postagem.",
+      "O produto só volta ao estoque e o processo é finalizado após a loja receber e conferir a peça.",
+      `Pedido: #${sale.id.slice(0, 8)}.`,
+    ].join("\n");
+  }
+
   async function simulateLabel(sale: SaleWithDocument) {
     const customerForLabel = validateLabelData(sale);
     if (!customerForLabel) return;
@@ -603,6 +646,97 @@ function AdminVendasContent() {
       alert("Erro ao gerar etiqueta.");
     } finally {
       setGeneratingLabel((prev) => ({ ...prev, [sale.id]: false }));
+    }
+  }
+
+
+  async function generateReverseLabel(sale: SaleWithDocument) {
+    if (!canGenerateReverseLabel(sale)) {
+      alert(
+        "A reversa só deve ser gerada para pedido enviado/entregue ou com cancelamento solicitado, com etiqueta de envio já gerada.",
+      );
+      return;
+    }
+
+    const customerForLabel = validateLabelData(sale);
+    if (!customerForLabel) return;
+
+    const confirmReverse = confirm(
+      "Gerar logística reversa para este pedido? Essa ação pode comprar a reversa no Melhor Envio.",
+    );
+
+    if (!confirmReverse) return;
+
+    setGeneratingReverse((prev) => ({ ...prev, [sale.id]: true }));
+
+    try {
+      const response = await fetch("/api/melhor-envio/reversa", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "generate",
+          saleId: sale.id,
+          customer: customerForLabel,
+          items: sale.items,
+          shippingOption: sale.shippingOption,
+        }),
+      });
+
+      const data = await readApiResponse(response);
+
+      if (!response.ok) {
+        console.error("Erro reversa:", data);
+        showApiError(data, "Erro ao gerar logística reversa.");
+        return;
+      }
+
+      await updateSaleReverseShippingLabel(sale.id, {
+        melhorEnvioReverseOrderId: data.orderId || "",
+        melhorEnvioReverseCode: data.reverseCode || "",
+        melhorEnvioReversePrintUrl:
+          data.reversePrintUrl || data.printUrl || "",
+        melhorEnvioReverseCreatedAt: Date.now(),
+        returnInstructions: getReverseInstructions(sale, data),
+      });
+
+      await changeStatus(sale.id, "aguardando_retorno" as SaleStatus);
+      await load();
+
+      if (data.reversePrintUrl || data.printUrl) {
+        window.open(data.reversePrintUrl || data.printUrl, "_blank");
+      }
+
+      alert(
+        "Logística reversa gerada. O andamento e o código aparecerão na página Minha Conta do cliente.",
+      );
+    } catch (error) {
+      console.error("Erro ao gerar reversa:", error);
+      alert("Erro ao gerar logística reversa.");
+    } finally {
+      setGeneratingReverse((prev) => ({ ...prev, [sale.id]: false }));
+    }
+  }
+
+  async function receiveReturnedProducts(sale: SaleWithDocument) {
+    const confirmReceive = confirm(
+      "Confirmar que o produto retornou para a loja e liberar estoque?",
+    );
+
+    if (!confirmReceive) return;
+
+    setReceivingReturn((prev) => ({ ...prev, [sale.id]: true }));
+
+    try {
+      await receiveReturnedSaleProducts(sale.id);
+      await load();
+      alert("Produto recebido, estoque liberado e venda cancelada.");
+    } catch (error) {
+      console.error("Erro ao receber devolução:", error);
+      alert("Erro ao receber devolução.");
+    } finally {
+      setReceivingReturn((prev) => ({ ...prev, [sale.id]: false }));
     }
   }
 
@@ -988,9 +1122,19 @@ function AdminVendasContent() {
                   !sale.melhorEnvioOrderId &&
                   !sale.melhorEnvioPrintUrl;
 
+                const canGenerateReverse = canGenerateReverseLabel(sale);
+                const hasReverse =
+                  Boolean(sale.melhorEnvioReverseOrderId) ||
+                  Boolean(sale.melhorEnvioReverseCode) ||
+                  Boolean(sale.melhorEnvioReversePrintUrl);
+                const canReceiveReturn =
+                  hasReverse &&
+                  !sale.returnReceivedAt &&
+                  String(sale.status) === "aguardando_retorno";
+
                 return (
-                  <>
-                    <tr key={sale.id}>
+                  <Fragment key={sale.id}>
+                    <tr>
                       <td>
                         <strong>#{sale.id.slice(0, 8)}</strong>
                         <div style={{ fontSize: 12, color: theme.brownSoft }}>
@@ -1113,7 +1257,7 @@ function AdminVendasContent() {
                     </tr>
 
                     {isOpen && (
-                      <tr>
+                      <tr key={`${sale.id}-details`}>
                         <td colSpan={10} style={{ background: "#fffaf2" }}>
                           <div id={`sale-print-${sale.id}`} style={{ padding: 18 }}>
                             <div className="row g-3 mb-3">
@@ -1323,6 +1467,68 @@ function AdminVendasContent() {
                               </h5>
                             </div>
 
+                            {hasReverse && (
+                              <div
+                                className="p-3 mb-3"
+                                style={{
+                                  background: "#fff",
+                                  borderRadius: 18,
+                                  border: `1px solid ${theme.border}`,
+                                }}
+                              >
+                                <h6 className="fw-bold mb-3">
+                                  Logística reversa
+                                </h6>
+
+                                <div className="row g-3">
+                                  <InfoItem
+                                    label="Pedido reverso Melhor Envio"
+                                    value={
+                                      sale.melhorEnvioReverseOrderId ||
+                                      "Não informado"
+                                    }
+                                  />
+
+                                  <InfoItem
+                                    label="Código de devolução"
+                                    value={
+                                      sale.melhorEnvioReverseCode ||
+                                      "Aguardando retorno da API"
+                                    }
+                                  />
+
+                                  <InfoItem
+                                    label="Criada em"
+                                    value={formatDate(
+                                      sale.melhorEnvioReverseCreatedAt,
+                                    )}
+                                  />
+
+                                  <InfoItem
+                                    label="Recebido pela loja"
+                                    value={
+                                      sale.returnReceivedAt
+                                        ? formatDate(sale.returnReceivedAt)
+                                        : "Ainda não recebido"
+                                    }
+                                  />
+                                </div>
+
+                                {sale.returnInstructions && (
+                                  <pre
+                                    className="mb-0 mt-3"
+                                    style={{
+                                      whiteSpace: "pre-wrap",
+                                      fontFamily: "inherit",
+                                      color: theme.brownSoft,
+                                    }}
+                                  >
+                                    {sale.returnInstructions}
+                                  </pre>
+                                )}
+                              </div>
+                            )}
+
                             <div
                               className="p-3"
                               style={{
@@ -1439,6 +1645,58 @@ function AdminVendasContent() {
 
                                 <button
                                   type="button"
+                                  className="btn btn-sm btn-outline-danger"
+                                  disabled={
+                                    isUpdatingThisSale ||
+                                    generatingReverse[sale.id] ||
+                                    !canGenerateReverse
+                                  }
+                                  style={{
+                                    borderRadius: 999,
+                                    opacity:
+                                      isUpdatingThisSale ||
+                                      generatingReverse[sale.id] ||
+                                      !canGenerateReverse
+                                        ? 0.65
+                                        : 1,
+                                  }}
+                                  onClick={() => generateReverseLabel(sale)}
+                                >
+                                  <Tag size={15} className="me-1" />
+                                  {generatingReverse[sale.id]
+                                    ? "Gerando reversa..."
+                                    : "Gerar reversa"}
+                                </button>
+
+                                {sale.melhorEnvioReversePrintUrl && (
+                                  <a
+                                    href={sale.melhorEnvioReversePrintUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="btn btn-sm btn-outline-secondary"
+                                    style={{ borderRadius: 999 }}
+                                  >
+                                    <Printer size={15} className="me-1" />
+                                    Abrir reversa
+                                  </a>
+                                )}
+
+                                {canReceiveReturn && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-success"
+                                    disabled={receivingReturn[sale.id]}
+                                    style={{ borderRadius: 999 }}
+                                    onClick={() => receiveReturnedProducts(sale)}
+                                  >
+                                    {receivingReturn[sale.id]
+                                      ? "Liberando estoque..."
+                                      : "Recebi produto"}
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
                                   className="btn btn-sm btn-outline-secondary"
                                   disabled={isUpdatingThisSale}
                                   style={{ borderRadius: 999 }}
@@ -1467,7 +1725,7 @@ function AdminVendasContent() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
 

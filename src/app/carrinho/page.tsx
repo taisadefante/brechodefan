@@ -23,6 +23,7 @@ import {
   getCustomerData,
   saveCustomerAddress,
   saveCustomerData,
+  updateSalePaymentData,
 } from "@/lib/firestore";
 import {
   CustomerAddress,
@@ -598,18 +599,23 @@ function CarrinhoContent() {
         return;
       }
 
-      if (payment.init_point) {
+      const paymentUrl = payment.init_point || payment.sandbox_init_point || "";
+      const mercadoPagoPreferenceId =
+        payment.id || payment.preferenceId || payment.preference_id || "";
+
+      await updateSalePaymentData(saleId, {
+        paymentUrl,
+        mercadoPagoPreferenceId,
+        paymentGeneratedAt: Date.now(),
+      });
+
+      if (paymentUrl) {
         clearCart();
-        window.location.href = payment.init_point;
+        window.location.href = paymentUrl;
         return;
       }
 
-      if (payment.sandbox_init_point) {
-        clearCart();
-        window.location.href = payment.sandbox_init_point;
-        return;
-      }
-
+      clearCart();
       router.push(`/obrigado?pedido=${saleId}`);
     } catch (error) {
       console.error("Erro ao finalizar compra:", error);

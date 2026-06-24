@@ -11,6 +11,7 @@ export type ProductFilters = {
   type?: string;
   subtype?: string;
   size?: string;
+  age?: string;
   color?: string;
   gender?: string;
   brand?: string;
@@ -34,30 +35,7 @@ function uniqueValues(products: Product[], key: keyof Product) {
         .map((product) => String(product[key] || "").trim())
         .filter(Boolean),
     ),
-  ).sort((a, b) => a.localeCompare(b));
-}
-
-function uniqueSizeAgeValues(products: Product[], filters: ProductFilters) {
-  if (!filters.category) return [];
-
-  const filteredByCategory = products.filter((product) => {
-    if (filters.category && product.category !== filters.category) return false;
-    if (filters.type && product.type !== filters.type) return false;
-    if (filters.subtype && product.subtype !== filters.subtype) return false;
-
-    return true;
-  });
-
-  return Array.from(
-    new Set(
-      filteredByCategory
-        .flatMap((product) => [
-          String(product.size || "").trim(),
-          String(product.age || "").trim(),
-        ])
-        .filter(Boolean),
-    ),
-  ).sort((a, b) => a.localeCompare(b));
+  ).sort((a, b) => a.localeCompare(b, "pt-BR"));
 }
 
 function filteredOptionsByCurrentSelection(
@@ -111,12 +89,8 @@ export function productMatchesFilters(
   const categoryOk = !filters.category || product.category === filters.category;
   const typeOk = !filters.type || product.type === filters.type;
   const subtypeOk = !filters.subtype || product.subtype === filters.subtype;
-
-  const sizeOk =
-    !filters.size ||
-    product.size === filters.size ||
-    product.age === filters.size;
-
+  const sizeOk = !filters.size || product.size === filters.size;
+  const ageOk = !filters.age || product.age === filters.age;
   const colorOk = !filters.color || product.color === filters.color;
   const genderOk = !filters.gender || product.gender === filters.gender;
   const brandOk = !filters.brand || product.brand === filters.brand;
@@ -137,6 +111,7 @@ export function productMatchesFilters(
     typeOk &&
     subtypeOk &&
     sizeOk &&
+    ageOk &&
     colorOk &&
     genderOk &&
     brandOk &&
@@ -171,6 +146,18 @@ export default function FilterBar({
     "subtype",
   );
 
+  const sizeProducts = filteredOptionsByCurrentSelection(
+    products,
+    filters,
+    "size",
+  );
+
+  const ageProducts = filteredOptionsByCurrentSelection(
+    products,
+    filters,
+    "age",
+  );
+
   const fields: {
     key: keyof ProductFilters;
     label: string;
@@ -199,8 +186,14 @@ export default function FilterBar({
     },
     {
       key: "size",
-      label: filters.category ? "Tamanho / Idade" : "Selecione categoria",
-      options: uniqueSizeAgeValues(products, filters),
+      label: "Tamanho",
+      options: uniqueValues(sizeProducts, "size"),
+      disabled: !filters.category,
+    },
+    {
+      key: "age",
+      label: "Idade",
+      options: uniqueValues(ageProducts, "age"),
       disabled: !filters.category,
     },
     {
@@ -230,15 +223,18 @@ export default function FilterBar({
       nextFilters.type = "";
       nextFilters.subtype = "";
       nextFilters.size = "";
+      nextFilters.age = "";
     }
 
     if (key === "type") {
       nextFilters.subtype = "";
       nextFilters.size = "";
+      nextFilters.age = "";
     }
 
     if (key === "subtype") {
       nextFilters.size = "";
+      nextFilters.age = "";
     }
 
     setFilters(nextFilters);
@@ -326,7 +322,9 @@ export default function FilterBar({
                 color: theme.brownDark,
               }}
             >
-              <option value="">{field.label}</option>
+              <option value="">
+                {field.disabled ? "Selecione categoria" : field.label}
+              </option>
 
               {field.options.map((option) => (
                 <option key={option} value={option}>

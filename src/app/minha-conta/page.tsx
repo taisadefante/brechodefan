@@ -25,6 +25,7 @@ import {
   requestCancelSale,
   saveCustomerAddress,
   saveCustomerData,
+  updateSalePaymentData,
 } from "@/lib/firestore";
 
 import { useAuth } from "@/contexts/AuthContext";
@@ -34,6 +35,18 @@ import { theme } from "@/lib/theme";
 
 type CustomerDataWithDocument = CustomerData & {
   document?: string;
+};
+
+type SaleWithReverse = Sale & {
+  melhorEnvioOrderId?: string;
+  melhorEnvioPrintUrl?: string;
+  melhorEnvioReverseOrderId?: string;
+  melhorEnvioReverseCode?: string;
+  melhorEnvioReversePrintUrl?: string;
+  melhorEnvioReverseCreatedAt?: number;
+  returnReceivedAt?: number;
+  returnInstructions?: string;
+  paymentGeneratedAt?: number;
 };
 
 const emptyCustomer: CustomerDataWithDocument = {
@@ -77,6 +90,122 @@ function formatCpf(value: string) {
     .replace(/\.(\d{3})(\d)/, ".$1-$2");
 }
 
+
+function formatDate(value?: number | string | null) {
+  if (!value) return "Não informado";
+
+  const date =
+    typeof value === "number" ? new Date(value) : new Date(String(value));
+
+  if (Number.isNaN(date.getTime())) return "Não informado";
+
+  return date.toLocaleString("pt-BR");
+}
+
+function deliveryTypeLabel(type?: string) {
+  if (type === "envio") return "Envio por transportadora";
+  if (type === "retirada") return "Retirada";
+  if (type === "combinar_whatsapp") return "Uber/99";
+
+  return type || "Não informado";
+}
+
+function getOrderProgress(sale: SaleWithReverse) {
+  const steps = [
+    {
+      key: "aguardando_pagamento",
+      title: "Pedido criado",
+      description: "Recebemos seu pedido. Aguarde a confirmação do pagamento.",
+    },
+    {
+      key: "pago",
+      title: "Pagamento confirmado",
+      description: "Pagamento confirmado. A loja vai preparar sua compra.",
+    },
+    {
+      key: "separando",
+      title: "Separando pedido",
+      description: "Sua peça está sendo separada com cuidado.",
+    },
+    {
+      key: "pronto_envio",
+      title: "Pronto para envio",
+      description: "Pedido pronto para gerar postagem.",
+    },
+    {
+      key: "enviado",
+      title: "Enviado",
+      description: "Pedido enviado para transporte.",
+    },
+    {
+      key: "entregue",
+      title: "Entregue",
+      description: "Pedido entregue.",
+    },
+  ];
+
+  const status = String(sale.status || "");
+
+  if (status === "cancelamento_solicitado") {
+    return [
+      ...steps.slice(0, 2),
+      {
+        key: "cancelamento_solicitado",
+        title: "Cancelamento solicitado",
+        description:
+          "Sua solicitação foi enviada para análise da loja. O produto ainda não volta ao estoque.",
+      },
+    ];
+  }
+
+  if (status === "aguardando_retorno") {
+    return [
+      ...steps,
+      {
+        key: "aguardando_retorno",
+        title: "Aguardando devolução",
+        description:
+          "A logística reversa foi criada. Envie o produto conforme as instruções abaixo.",
+      },
+    ];
+  }
+
+  if (status === "cancelado") {
+    return [
+      ...steps.slice(0, 2),
+      {
+        key: "cancelado",
+        title: "Cancelado/finalizado",
+        description:
+          "O pedido foi cancelado. Quando houver devolução, a loja finaliza após receber e conferir o produto.",
+      },
+    ];
+  }
+
+  return steps;
+}
+
+function isStepActive(sale: SaleWithReverse, stepKey: string) {
+  const order = [
+    "aguardando_pagamento",
+    "pago",
+    "separando",
+    "pronto_envio",
+    "enviado",
+    "entregue",
+    "cancelamento_solicitado",
+    "aguardando_retorno",
+    "cancelado",
+  ];
+
+  const currentIndex = order.indexOf(String(sale.status || ""));
+  const stepIndex = order.indexOf(stepKey);
+
+  if (stepIndex < 0 || currentIndex < 0) return false;
+
+  return stepIndex <= currentIndex;
+}
+
 function MinhaContaContent() {
   const { user, loading, login, register, resetPassword, logout } = useAuth();
 
@@ -89,7 +218,7 @@ function MinhaContaContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [customer, setCustomer] =
     useState<CustomerDataWithDocument>(emptyCustomer);
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [sales, setSales] = useState<SaleWithReverse[]>([]);
   const [openSaleId, setOpenSaleId] = useState<string | null>(null);
 
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
@@ -101,13 +230,14 @@ function MinhaContaContent() {
   const [erro, setErro] = useState("");
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
+  const [generatingPaymentId, setGeneratingPaymentId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
 
     setActiveTab("compras");
 
-    getUserSales(user.uid).then(setSales);
+    getUserSales(user.uid).then((list) => setSales(list as SaleWithReverse[]));
     getCustomerAddresses(user.uid).then(setAddresses);
 
     getCustomerData(user.uid).then((data) => {
@@ -364,6 +494,78 @@ function MinhaContaContent() {
     }
   }
 
+
+  async function generatePaymentLink(sale: SaleWithReverse) {
+    if (sale.status !== "aguardando_pagamento") {
+      setErro("Este pedido não está aguardando pagamento.");
+      return;
+    }
+
+    setGeneratingPaymentId(sale.id);
+    setErro("");
+    setSuccess("");
+
+    try {
+      const response = await fetch("/api/mercadopago", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          items: sale.items,
+          deliveryPrice: Number(sale.deliveryPrice || 0),
+          customer: sale.customer,
+          saleId: sale.id,
+        }),
+      });
+
+      const payment = await response.json();
+
+      if (!response.ok) {
+        console.error("Erro Mercado Pago:", payment);
+        setErro(payment.error || "Erro ao gerar link de pagamento.");
+        return;
+      }
+
+      const paymentUrl = payment.init_point || payment.sandbox_init_point || "";
+      const mercadoPagoPreferenceId =
+        payment.id || payment.preferenceId || payment.preference_id || "";
+
+      if (!paymentUrl) {
+        setErro("O Mercado Pago não retornou o link de pagamento.");
+        return;
+      }
+
+      const paymentGeneratedAt = Date.now();
+
+      await updateSalePaymentData(sale.id, {
+        paymentUrl,
+        mercadoPagoPreferenceId,
+        paymentGeneratedAt,
+      });
+
+      setSales((currentSales) =>
+        currentSales.map((item) =>
+          item.id === sale.id
+            ? {
+                ...item,
+                paymentUrl,
+                mercadoPagoPreferenceId,
+                paymentGeneratedAt,
+              }
+            : item,
+        ),
+      );
+
+      window.location.href = paymentUrl;
+    } catch (error) {
+      console.error("Erro ao gerar pagamento:", error);
+      setErro("Erro ao gerar link de pagamento.");
+    } finally {
+      setGeneratingPaymentId(null);
+    }
+  }
+
   async function cancelSale(id: string) {
     const reason = prompt("Motivo do cancelamento:");
     if (!reason) return;
@@ -371,7 +573,7 @@ function MinhaContaContent() {
     await requestCancelSale(id, reason);
 
     if (user) {
-      setSales(await getUserSales(user.uid));
+      setSales((await getUserSales(user.uid)) as SaleWithReverse[]);
     }
   }
 
@@ -649,7 +851,7 @@ function MinhaContaContent() {
                       </span>
 
                       <span>
-                        Entrega: <strong>{sale.deliveryType}</strong>
+                        Entrega: <strong>{deliveryTypeLabel(sale.deliveryType)}</strong>
                       </span>
 
                       <span
@@ -695,7 +897,7 @@ function MinhaContaContent() {
                         <small style={{ color: theme.brownSoft }}>
                           Forma de entrega
                         </small>
-                        <p className="mb-0 fw-bold">{sale.deliveryType}</p>
+                        <p className="mb-0 fw-bold">{deliveryTypeLabel(sale.deliveryType)}</p>
                       </div>
 
                       <div className="col-md-4">
@@ -723,6 +925,146 @@ function MinhaContaContent() {
                         </p>
                       </div>
                     </div>
+
+
+                    <h6 className="fw-bold mb-2">Andamento do pedido</h6>
+
+                    <div
+                      className="p-3 mb-3"
+                      style={{
+                        background: "#fff",
+                        borderRadius: 16,
+                        border: `1px solid ${theme.border}`,
+                      }}
+                    >
+                      <div className="d-grid gap-2">
+                        {getOrderProgress(sale).map((step) => {
+                          const active = isStepActive(sale, step.key);
+
+                          return (
+                            <div
+                              key={step.key}
+                              className="d-flex gap-2"
+                              style={{
+                                opacity: active ? 1 : 0.45,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: 18,
+                                  height: 18,
+                                  borderRadius: "50%",
+                                  background: active
+                                    ? theme.brown
+                                    : "transparent",
+                                  border: `2px solid ${theme.brown}`,
+                                  marginTop: 2,
+                                  flexShrink: 0,
+                                }}
+                              />
+
+                              <div>
+                                <strong>{step.title}</strong>
+                                <p
+                                  className="mb-0"
+                                  style={{
+                                    color: theme.brownSoft,
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  {step.description}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {(sale.trackingCode ||
+                      sale.melhorEnvioReverseCode ||
+                      sale.melhorEnvioReversePrintUrl ||
+                      sale.returnInstructions) && (
+                      <div
+                        className="p-3 mb-3"
+                        style={{
+                          background: "#fff",
+                          borderRadius: 16,
+                          border: `1px solid ${theme.border}`,
+                        }}
+                      >
+                        <h6 className="fw-bold mb-2">
+                          Rastreamento e devolução
+                        </h6>
+
+                        {sale.trackingCode && (
+                          <p className="mb-1">
+                            <strong>Código de rastreio:</strong>{" "}
+                            {sale.trackingCode}
+                          </p>
+                        )}
+
+                        {sale.melhorEnvioReverseCode && (
+                          <p className="mb-1">
+                            <strong>Código de logística reversa:</strong>{" "}
+                            {sale.melhorEnvioReverseCode}
+                          </p>
+                        )}
+
+                        {sale.melhorEnvioReverseCreatedAt && (
+                          <p className="mb-1">
+                            <strong>Reversa criada em:</strong>{" "}
+                            {formatDate(sale.melhorEnvioReverseCreatedAt)}
+                          </p>
+                        )}
+
+                        {sale.returnReceivedAt && (
+                          <p className="mb-1">
+                            <strong>Produto recebido pela loja em:</strong>{" "}
+                            {formatDate(sale.returnReceivedAt)}
+                          </p>
+                        )}
+
+                        {sale.melhorEnvioReversePrintUrl && (
+                          <a
+                            href={sale.melhorEnvioReversePrintUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn btn-sm mb-2"
+                            style={{
+                              background: theme.brown,
+                              color: "#fff",
+                              borderRadius: 999,
+                            }}
+                          >
+                            Abrir documento da devolução
+                          </a>
+                        )}
+
+                        {sale.returnInstructions && (
+                          <div
+                            className="mt-2 p-3"
+                            style={{
+                              background: "#fffaf2",
+                              borderRadius: 14,
+                              color: theme.brownSoft,
+                              whiteSpace: "pre-wrap",
+                              fontSize: 14,
+                            }}
+                          >
+                            {sale.returnInstructions}
+                          </div>
+                        )}
+
+                        {sale.melhorEnvioReverseCode && (
+                          <div className="alert alert-warning py-2 mt-3 mb-0">
+                            Leve o produto embalado ao ponto/agência da
+                            transportadora e informe o código de devolução. Guarde
+                            o comprovante de postagem.
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <h6 className="fw-bold mb-2">Produtos da compra</h6>
 
@@ -821,22 +1163,65 @@ function MinhaContaContent() {
                       </p>
                     </div>
 
-                    <div className="d-flex flex-wrap gap-2">
-                      {sale.paymentUrl &&
-                        sale.status === "aguardando_pagamento" && (
-                          <a
-                            className="btn btn-sm"
-                            href={sale.paymentUrl}
-                            style={{
-                              background: theme.brown,
-                              color: "#fff",
-                              borderRadius: 999,
-                            }}
-                          >
-                            Pagar pedido
-                          </a>
+                    {sale.status === "aguardando_pagamento" && (
+                      <div
+                        className="p-3 mb-3"
+                        style={{
+                          background: "#fff",
+                          borderRadius: 16,
+                          border: `1px solid ${theme.border}`,
+                        }}
+                      >
+                        <h6 className="fw-bold mb-2">Pagamento</h6>
+
+                        <p className="mb-2" style={{ color: theme.brownSoft }}>
+                          Se a página fechou, caiu a internet ou você não conseguiu
+                          finalizar na hora, use o botão abaixo para continuar o
+                          pagamento do pedido.
+                        </p>
+
+                        {sale.paymentGeneratedAt && (
+                          <p className="mb-2" style={{ fontSize: 13 }}>
+                            <strong>Link gerado em:</strong>{" "}
+                            {formatDate(sale.paymentGeneratedAt)}
+                          </p>
                         )}
 
+                        <div className="d-flex flex-wrap gap-2">
+                          {sale.paymentUrl && (
+                            <a
+                              className="btn btn-sm"
+                              href={sale.paymentUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                background: theme.brown,
+                                color: "#fff",
+                                borderRadius: 999,
+                              }}
+                            >
+                              Pagar pedido
+                            </a>
+                          )}
+
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            disabled={generatingPaymentId === sale.id}
+                            onClick={() => generatePaymentLink(sale)}
+                            style={{ borderRadius: 999 }}
+                          >
+                            {generatingPaymentId === sale.id
+                              ? "Gerando link..."
+                              : sale.paymentUrl
+                                ? "Gerar novo link"
+                                : "Gerar link de pagamento"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="d-flex flex-wrap gap-2">
                       {![
                         "cancelado",
                         "entregue",

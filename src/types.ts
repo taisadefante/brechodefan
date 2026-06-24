@@ -13,6 +13,9 @@ export type SaleStatus =
   | "enviado"
   | "entregue"
   | "cancelamento_solicitado"
+  | "devolucao_aprovada"
+  | "aguardando_retorno"
+  | "produto_recebido"
   | "cancelado";
 
 export type DeliveryType = "retirada" | "combinar_whatsapp" | "envio";
@@ -24,6 +27,7 @@ export type Product = {
   name: string;
   description: string;
   price: number;
+  costPrice?: number;
   category: string;
   type?: string;
   subtype?: string;
@@ -120,23 +124,53 @@ export type Sale = {
   customer: CustomerData;
   shippingAddress?: CustomerAddress | null;
   items: CartItem[];
+
   subtotal: number;
   deliveryType: DeliveryType;
   shippingOption?: ShippingOption | null;
   deliveryPrice: number;
   total: number;
+
+  productsRevenue?: number;
+  productsCost?: number;
+  shippingRevenue?: number;
+  shippingCostPaidByStore?: number;
+  shippingCost?: number;
+  grossProfit?: number;
+  netProfit?: number;
+
   status: SaleStatus;
   trackingCode?: string;
+
   cancelRequested?: boolean;
   cancelReason?: string;
+  cancelRequestedAt?: number;
+  cancelApproved?: boolean;
+  cancelApprovedAt?: number;
+  canceledAt?: number;
+
   melhorEnvioOrderId?: string;
   melhorEnvioPrintUrl?: string;
   melhorEnvioTrackingCode?: string;
   melhorEnvioStatus?: string;
+
+  reverseRequested?: boolean;
+  reverseReason?: string;
+  reverseRequestedAt?: number;
+  reverseApprovedAt?: number;
+  reverseOrderId?: string;
+  reversePrintUrl?: string;
+  reverseTrackingCode?: string;
+  reverseStatus?: string;
+  reverseInstructions?: string;
+  returnReceivedAt?: number;
+
   inventoryProcessed?: boolean;
   inventoryRestored?: boolean;
+
   createdAt: number;
   updatedAt: number;
   paymentUrl?: string;
   mercadoPagoPreferenceId?: string;
+  paymentGeneratedAt?: number;
 };

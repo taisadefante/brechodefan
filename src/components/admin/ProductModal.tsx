@@ -228,6 +228,7 @@ export default function ProductModal({
 
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [cropSrc, setCropSrc] = useState("");
   const [crop, setCrop] = useState<Crop>(createInitialCrop());
   const [completedCrop, setCompletedCrop] = useState<PixelCrop | null>(null);
@@ -355,6 +356,11 @@ export default function ProductModal({
     const file = files?.[0];
     if (!file) return;
 
+    if (!file.type.startsWith("image/")) {
+      alert("Selecione apenas arquivos de imagem.");
+      return;
+    }
+
     const reader = new FileReader();
 
     reader.onload = () => {
@@ -367,6 +373,33 @@ export default function ProductModal({
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
+  }
+
+  function handleDropImage(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    setIsDraggingImage(false);
+
+    if (uploading || saving) return;
+
+    const files = e.dataTransfer.files;
+
+    if (!files || files.length === 0) return;
+
+    const imageFiles = Array.from(files).filter((file) =>
+      file.type.startsWith("image/"),
+    );
+
+    if (imageFiles.length === 0) {
+      alert("Arraste apenas imagens.");
+      return;
+    }
+
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(imageFiles[0]);
+
+    onCropImageSelected(dataTransfer.files);
   }
 
   async function uploadBase64Image(base64: string) {
@@ -678,7 +711,8 @@ export default function ProductModal({
               </h3>
 
               <p className="mb-0" style={{ color: theme.brownSoft }}>
-                Cadastre categoria, preço, custo, margem e informações completas da peça.
+                Cadastre categoria, preço, custo, margem e informações completas
+                da peça.
               </p>
             </div>
 
@@ -848,51 +882,101 @@ export default function ProductModal({
             <div className="col-12">
               <label className="form-label">Imagens</label>
 
-              <div className="d-flex gap-2 flex-wrap mb-3">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={(e) => onCropImageSelected(e.target.files)}
-                />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => onCropImageSelected(e.target.files)}
+              />
 
-                <input
-                  ref={cameraInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  hidden
-                  onChange={(e) => onCropImageSelected(e.target.files)}
-                />
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                hidden
+                onChange={(e) => onCropImageSelected(e.target.files)}
+              />
 
-                <button
-                  type="button"
-                  className="btn btn-outline-secondary"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading || saving}
-                  style={{ borderRadius: 999 }}
-                >
-                  Anexar imagem
-                </button>
+              <div
+                onClick={() => {
+                  if (!uploading && !saving) {
+                    fileInputRef.current?.click();
+                  }
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDraggingImage(true);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDraggingImage(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDraggingImage(false);
+                }}
+                onDrop={handleDropImage}
+                style={{
+                  background: isDraggingImage ? "#f8efe5" : "#fff",
+                  border: `2px dashed ${
+                    isDraggingImage ? theme.brown : theme.border
+                  }`,
+                  borderRadius: 22,
+                  padding: 22,
+                  cursor: uploading || saving ? "not-allowed" : "pointer",
+                  textAlign: "center",
+                  transition: "0.2s ease",
+                  marginBottom: 16,
+                }}
+              >
+                <p className="fw-bold mb-1">
+                  Arraste a imagem do produto aqui
+                </p>
 
-                <button
-                  type="button"
-                  className="btn btn-outline-secondary d-flex align-items-center justify-content-center"
-                  title="Tirar foto"
-                  aria-label="Tirar foto"
-                  onClick={() => cameraInputRef.current?.click()}
-                  disabled={uploading || saving}
-                  style={{
-                    width: 44,
-                    height: 38,
-                    borderRadius: 10,
-                  }}
-                >
-                  <Camera size={20} />
-                </button>
+                <small style={{ color: theme.brownSoft }}>
+                  ou clique para anexar uma imagem
+                </small>
 
-                {uploading && <span>Enviando...</span>}
+                <div className="d-flex gap-2 flex-wrap justify-content-center mt-3">
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fileInputRef.current?.click();
+                    }}
+                    disabled={uploading || saving}
+                    style={{ borderRadius: 999 }}
+                  >
+                    Anexar imagem
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary d-flex align-items-center justify-content-center"
+                    title="Tirar foto"
+                    aria-label="Tirar foto"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cameraInputRef.current?.click();
+                    }}
+                    disabled={uploading || saving}
+                    style={{
+                      width: 44,
+                      height: 38,
+                      borderRadius: 10,
+                    }}
+                  >
+                    <Camera size={20} />
+                  </button>
+
+                  {uploading && <span>Enviando...</span>}
+                </div>
               </div>
 
               <div className="d-flex flex-wrap gap-2">

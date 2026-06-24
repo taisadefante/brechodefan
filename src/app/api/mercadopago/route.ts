@@ -10,13 +10,32 @@ type MercadoPagoRequest = {
   saleId?: string;
 };
 
+function onlyNumbers(value?: string) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function getSiteUrl() {
+  const rawUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.SITE_URL ||
+    "http://localhost:3000";
+
+  const url = rawUrl.trim().replace(/\/$/, "");
+
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  return `https://${url}`;
+}
+
 export async function POST(req: Request) {
   try {
     const { items, deliveryPrice, customer, saleId } =
       (await req.json()) as MercadoPagoRequest;
 
     const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    const siteUrl = getSiteUrl();
 
     if (!accessToken) {
       return NextResponse.json(
@@ -25,7 +44,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!items?.length) {
+    if (!items || items.length === 0) {
       return NextResponse.json(
         { error: "Carrinho vazio." },
         { status: 400 },
@@ -33,8 +52,8 @@ export async function POST(req: Request) {
     }
 
     const mpItems = items.map((item) => ({
-      id: item.id,
-      title: item.name,
+      id: String(item.id),
+      title: String(item.name || "Produto"),
       quantity: Number(item.quantity || 1),
       currency_id: "BRL",
       unit_price: Number(item.price || 0),
@@ -53,18 +72,23 @@ export async function POST(req: Request) {
     const isLocalhost =
       siteUrl.includes("localhost") || siteUrl.includes("127.0.0.1");
 
+    const documentNumber = onlyNumbers(customer?.document);
+
+    const payer: Record<string, unknown> = {
+      name: customer?.name || "",
+      email: customer?.email || "",
+    };
+
+    if (documentNumber.length === 11) {
+      payer.identification = {
+        type: "CPF",
+        number: documentNumber,
+      };
+    }
+
     const preferenceBody: Record<string, unknown> = {
       items: mpItems,
-      payer: {
-        name: customer?.name || "",
-        email: customer?.email || "",
-        identification: customer?.document
-          ? {
-              type: "CPF",
-              number: customer.document,
-            }
-          : undefined,
-      },
+      payer,
       external_reference: saleId || "",
       back_urls: {
         success: `${siteUrl}/minha-conta?pagamento=sucesso`,
@@ -74,9 +98,11 @@ export async function POST(req: Request) {
       statement_descriptor: "DEFAN BRECHO",
     };
 
-    if (!isLocalhost) {
+    if (!isLocalhost && siteUrl.startsWith("https://")) {
       preferenceBody.auto_return = "approved";
     }
+
+    console.log("Preferência Mercado Pago:", preferenceBody);
 
     const response = await fetch(
       "https://api.mercadopago.com/checkout/preferences",
@@ -108,6 +134,7 @@ export async function POST(req: Request) {
       id: data.id || "",
       init_point: data.init_point || "",
       sandbox_init_point: data.sandbox_init_point || "",
+      checkout_url: data.sandbox_init_point || data.init_point || "",
     });
   } catch (error) {
     console.error("Erro ao criar preferência Mercado Pago:", error);
