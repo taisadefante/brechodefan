@@ -12,12 +12,23 @@ import { OptionDoc, OptionType, Product, ShippingProfile } from "@/types";
 import { theme } from "@/lib/theme";
 import OptionManagerModal, { ExtendedOptionType } from "./OptionManagerModal";
 
-type ProductForm = Omit<Product, "id"> & {
+type NumberOrEmpty = number | "";
+
+type ProductForm = Omit<
+  Product,
+  "id" | "price" | "stock" | "weight" | "height" | "width" | "length"
+> & {
+  price: NumberOrEmpty;
+  stock: NumberOrEmpty;
+  weight: NumberOrEmpty;
+  height: NumberOrEmpty;
+  width: NumberOrEmpty;
+  length: NumberOrEmpty;
   shippingProfile?: ShippingProfile | "";
   type?: string;
   subtype?: string;
-  costPrice?: number;
-  desiredMargin?: number;
+  costPrice?: NumberOrEmpty;
+  desiredMargin?: NumberOrEmpty;
 };
 
 const CROP_PREVIEW_SIZE = 520;
@@ -57,9 +68,9 @@ const shippingProfiles: Record<
 const emptyForm: ProductForm = {
   name: "",
   description: "",
-  price: 0,
-  costPrice: 0,
-  desiredMargin: 0,
+  price: "",
+  costPrice: "",
+  desiredMargin: "",
   category: "",
   type: "",
   subtype: "",
@@ -70,7 +81,7 @@ const emptyForm: ProductForm = {
   brand: DEFAULT_BRAND,
   condition: DEFAULT_CONDITION,
   measurements: "",
-  stock: 1,
+  stock: "",
   shippingProfile: DEFAULT_SHIPPING_PROFILE,
   weight: shippingProfiles.leve.weight,
   height: shippingProfiles.leve.height,
@@ -116,18 +127,19 @@ function uniqueNames(names: string[]) {
 }
 
 function ensureOption(options: string[], value: string) {
+  const cleanValue = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
   const exists = options.some(
     (item) =>
       item
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
         .toLowerCase()
-        .trim() ===
-      value
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase()
-        .trim(),
+        .trim() === cleanValue,
   );
 
   return exists ? options : [value, ...options];
@@ -136,16 +148,29 @@ function ensureOption(options: string[], value: string) {
 function createInitialCrop(): Crop {
   return {
     unit: "%",
+    x: 8,
+    y: 8,
+    width: 84,
+    height: 84,
+  };
+}
+
+function createFullImagePixelCrop(image: HTMLImageElement): PixelCrop {
+  return {
+    unit: "px",
     x: 0,
     y: 0,
-    width: 100,
-    height: 100,
+    width: image.width,
+    height: image.height,
   };
+}
+
+function toNumber(value: NumberOrEmpty | undefined) {
+  return Number(value || 0);
 }
 
 function formatPercent(value: number) {
   if (!Number.isFinite(value)) return "0%";
-
   return `${value.toFixed(2).replace(".", ",")}%`;
 }
 
@@ -158,7 +183,6 @@ function formatCurrencyPreview(value: number) {
 
 function calculateMargin(costPrice: number, salePrice: number) {
   if (!salePrice || salePrice <= 0) return 0;
-
   return ((salePrice - costPrice) / salePrice) * 100;
 }
 
@@ -166,7 +190,6 @@ function calculateSalePriceByMargin(costPrice: number, margin: number) {
   if (!costPrice || costPrice <= 0) return 0;
   if (!margin || margin <= 0) return costPrice;
   if (margin >= 100) return costPrice;
-
   return costPrice / (1 - margin / 100);
 }
 
@@ -189,6 +212,7 @@ export default function ProductModal({
           type: currentProduct.type || "",
           subtype: currentProduct.subtype || "",
           age: "",
+          price: Number(currentProduct.price || 0),
           costPrice: Number(currentProduct.costPrice || 0),
           desiredMargin: Number(currentProduct.desiredMargin || 0),
           shippingProfile:
@@ -237,8 +261,8 @@ export default function ProductModal({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
-  const costPrice = Number(form.costPrice || 0);
-  const salePrice = Number(form.price || 0);
+  const costPrice = toNumber(form.costPrice);
+  const salePrice = toNumber(form.price);
   const grossProfit = salePrice - costPrice;
   const currentMargin = calculateMargin(costPrice, salePrice);
 
@@ -306,7 +330,17 @@ export default function ProductModal({
     loadOptions();
   }, []);
 
-  function handleCostChange(value: number) {
+  function handleCostChange(value: NumberOrEmpty) {
+    if (value === "") {
+      setForm((prev) => ({
+        ...prev,
+        costPrice: "",
+        price: "",
+        desiredMargin: "",
+      }));
+      return;
+    }
+
     const cleanCost = Number(value || 0);
 
     setForm((prev) => {
@@ -327,7 +361,16 @@ export default function ProductModal({
     });
   }
 
-  function handleSalePriceChange(value: number) {
+  function handleSalePriceChange(value: NumberOrEmpty) {
+    if (value === "") {
+      setForm({
+        ...form,
+        price: "",
+        desiredMargin: "",
+      });
+      return;
+    }
+
     const cleanPrice = Number(value || 0);
     const margin = calculateMargin(Number(form.costPrice || 0), cleanPrice);
 
@@ -338,7 +381,15 @@ export default function ProductModal({
     });
   }
 
-  function handleDesiredMarginChange(value: number) {
+  function handleDesiredMarginChange(value: NumberOrEmpty) {
+    if (value === "") {
+      setForm({
+        ...form,
+        desiredMargin: "",
+      });
+      return;
+    }
+
     const cleanMargin = Number(value || 0);
     const newSalePrice = calculateSalePriceByMargin(
       Number(form.costPrice || 0),
@@ -384,7 +435,6 @@ export default function ProductModal({
     if (uploading || saving) return;
 
     const files = e.dataTransfer.files;
-
     if (!files || files.length === 0) return;
 
     const imageFiles = Array.from(files).filter((file) =>
@@ -430,7 +480,7 @@ export default function ProductModal({
       const cropToUse =
         completedCrop?.width && completedCrop?.height
           ? completedCrop
-          : { x: 0, y: 0, width: image.width, height: image.height };
+          : createFullImagePixelCrop(image);
 
       const scaleX = image.naturalWidth / image.width;
       const scaleY = image.naturalHeight / image.height;
@@ -696,8 +746,85 @@ export default function ProductModal({
         padding: 16,
       }}
     >
+      <style jsx global>{`
+        .mobile-crop-wrapper .ReactCrop {
+          max-width: 100%;
+          touch-action: none;
+        }
+
+        .mobile-crop-wrapper .ReactCrop__crop-selection {
+          touch-action: none;
+          border: 2px solid #ffffff;
+          box-shadow:
+            0 0 0 9999em rgba(0, 0, 0, 0.35),
+            0 0 0 1px rgba(0, 0, 0, 0.25);
+        }
+
+        .mobile-crop-wrapper .ReactCrop__drag-handle {
+          width: 18px;
+          height: 18px;
+          background: #ffffff;
+          border: 2px solid #5c4033;
+          border-radius: 50%;
+          opacity: 1;
+        }
+
+        .mobile-crop-wrapper .ReactCrop__drag-handle::after {
+          display: none;
+        }
+
+        @media (max-width: 768px) {
+          .product-modal-card {
+            padding: 16px !important;
+            border-radius: 22px !important;
+          }
+
+          .mobile-crop-wrapper .ReactCrop__drag-handle {
+            width: 26px;
+            height: 26px;
+          }
+
+          .mobile-crop-wrapper .ReactCrop__drag-handle.ord-n {
+            top: -13px;
+          }
+
+          .mobile-crop-wrapper .ReactCrop__drag-handle.ord-s {
+            bottom: -13px;
+          }
+
+          .mobile-crop-wrapper .ReactCrop__drag-handle.ord-e {
+            right: -13px;
+          }
+
+          .mobile-crop-wrapper .ReactCrop__drag-handle.ord-w {
+            left: -13px;
+          }
+
+          .mobile-crop-wrapper .ReactCrop__drag-handle.ord-nw {
+            top: -13px;
+            left: -13px;
+          }
+
+          .mobile-crop-wrapper .ReactCrop__drag-handle.ord-ne {
+            top: -13px;
+            right: -13px;
+          }
+
+          .mobile-crop-wrapper .ReactCrop__drag-handle.ord-sw {
+            bottom: -13px;
+            left: -13px;
+          }
+
+          .mobile-crop-wrapper .ReactCrop__drag-handle.ord-se {
+            bottom: -13px;
+            right: -13px;
+          }
+        }
+      `}</style>
+
       <div className="container my-4">
         <div
+          className="product-modal-card"
           style={{
             background: theme.ivory2,
             borderRadius: 30,
@@ -746,9 +873,12 @@ export default function ProductModal({
                 type="number"
                 step="0.01"
                 min="0"
+                placeholder="Ex: 50,00"
                 value={form.price}
                 onChange={(e) =>
-                  handleSalePriceChange(Number(e.target.value || 0))
+                  handleSalePriceChange(
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
                 }
               />
             </div>
@@ -761,8 +891,13 @@ export default function ProductModal({
                 type="number"
                 step="0.01"
                 min="0"
-                value={form.costPrice || 0}
-                onChange={(e) => handleCostChange(Number(e.target.value || 0))}
+                placeholder="Ex: 20,00"
+                value={form.costPrice}
+                onChange={(e) =>
+                  handleCostChange(
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
+                }
               />
             </div>
 
@@ -775,9 +910,12 @@ export default function ProductModal({
                 step="0.01"
                 min="0"
                 max="99.99"
-                value={form.desiredMargin || 0}
+                placeholder="Ex: 40"
+                value={form.desiredMargin}
                 onChange={(e) =>
-                  handleDesiredMarginChange(Number(e.target.value || 0))
+                  handleDesiredMarginChange(
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
                 }
               />
             </div>
@@ -839,9 +977,13 @@ export default function ProductModal({
                 className="form-control"
                 type="number"
                 min={1}
+                placeholder="Ex: 1"
                 value={form.stock}
                 onChange={(e) =>
-                  setForm({ ...form, stock: Number(e.target.value) })
+                  setForm({
+                    ...form,
+                    stock: e.target.value === "" ? "" : Number(e.target.value),
+                  })
                 }
               />
             </div>
@@ -1025,13 +1167,14 @@ export default function ProductModal({
 
               {cropSrc && (
                 <div
-                  className="mt-4 p-3"
+                  className="mt-4 p-3 mobile-crop-wrapper"
                   style={{ background: "#fff", borderRadius: 18 }}
                 >
                   <p className="fw-bold mb-1">Editar nova imagem</p>
 
                   <small style={{ color: theme.brownSoft }}>
-                    Arraste as bordas para cortar livremente.
+                    No celular, toque e arraste as bolinhas brancas para diminuir
+                    altura e largura.
                   </small>
 
                   <div
@@ -1041,7 +1184,7 @@ export default function ProductModal({
                       maxWidth: "100%",
                       background: "#f3eadf",
                       borderRadius: 18,
-                      overflow: "hidden",
+                      overflow: "visible",
                       border: `1px solid ${theme.border}`,
                     }}
                   >
@@ -1050,16 +1193,27 @@ export default function ProductModal({
                       onChange={(_, percentCrop) => setCrop(percentCrop)}
                       onComplete={(pixelCrop) => setCompletedCrop(pixelCrop)}
                       keepSelection
+                      ruleOfThirds
+                      style={{
+                        touchAction: "none",
+                        maxWidth: "100%",
+                      }}
                     >
                       <img
                         ref={imageRef}
                         src={cropSrc}
                         alt="Cortar"
-                        onLoad={() => setCrop(createInitialCrop())}
+                        onLoad={() => {
+                          setCrop(createInitialCrop());
+                          setCompletedCrop(null);
+                        }}
                         style={{
                           width: "100%",
                           height: "auto",
                           display: "block",
+                          touchAction: "none",
+                          userSelect: "none",
+                          WebkitUserSelect: "none",
                         }}
                       />
                     </ReactCrop>
@@ -1078,6 +1232,19 @@ export default function ProductModal({
                       }}
                     >
                       {uploading ? "Salvando imagem..." : "Salvar imagem"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-secondary"
+                      disabled={uploading || saving}
+                      onClick={() => {
+                        setCrop(createInitialCrop());
+                        setCompletedCrop(null);
+                      }}
+                      style={{ borderRadius: 999 }}
+                    >
+                      Resetar corte
                     </button>
 
                     <button

@@ -248,6 +248,25 @@ function InfoItem({
   );
 }
 
+function WhatsAppIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      aria-hidden="true"
+      focusable="false"
+      style={{ display: "inline-block", verticalAlign: "-2px" }}
+    >
+      <path
+        fill="currentColor"
+        d="M16.04 3C9.42 3 4.03 8.36 4.03 14.95c0 2.11.56 4.17 1.62 5.98L4 29l8.28-1.62a12.08 12.08 0 0 0 5.76 1.46h.01c6.62 0 12.01-5.36 12.01-11.95S22.66 3 16.04 3Zm0 23.8h-.01a9.99 9.99 0 0 1-5.08-1.39l-.36-.21-4.92.96.98-4.79-.24-.39a9.86 9.86 0 0 1-1.52-5.23c0-5.47 4.48-9.92 9.99-9.92 2.67 0 5.18 1.04 7.07 2.91a9.84 9.84 0 0 1 2.93 7.01c0 5.47-4.48 9.92-9.99 9.92Zm5.48-7.43c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.27-.46-2.42-1.47-.89-.79-1.5-1.77-1.67-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.67-1.6-.92-2.19-.24-.57-.49-.49-.67-.5h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.01-1.04 2.46s1.07 2.86 1.22 3.06c.15.2 2.1 3.18 5.08 4.46.71.3 1.26.48 1.69.61.71.22 1.36.19 1.87.12.57-.09 1.77-.72 2.02-1.42.25-.7.25-1.29.17-1.42-.07-.12-.27-.2-.57-.35Z"
+      />
+    </svg>
+  );
+}
+
+
 function AdminVendasContent() {
   const { adminUser, loadingAdmin, isAdmin } = useAdminAuth();
 
@@ -766,6 +785,33 @@ function AdminVendasContent() {
     `);
 
     printWindow.document.close();
+  }
+
+  function openWhatsApp(sale: SaleWithDocument) {
+    const rawPhone = onlyNumbers(sale.customer?.phone);
+
+    if (!rawPhone) {
+      alert("Cliente não possui telefone/WhatsApp cadastrado.");
+      return;
+    }
+
+    const phone = rawPhone.startsWith("55") ? rawPhone : `55${rawPhone}`;
+    const customerName = sale.customer?.name?.trim() || "cliente";
+    const trackingCode = tracking[sale.id] ?? sale.trackingCode ?? "";
+
+    const messageLines = [
+      `Olá, ${customerName}! 😊`,
+      "",
+      `Aqui é do Brechó Defan. Estou entrando em contato sobre o seu pedido #${sale.id.slice(0, 8)}.`,
+      `Status atual: ${statusLabel(sale.status)}.`,
+      trackingCode ? `Código de rastreio: ${trackingCode}.` : "",
+      "",
+      "Qualquer dúvida, estou à disposição.",
+    ].filter(Boolean);
+
+    const message = encodeURIComponent(messageLines.join("\n"));
+
+    window.open(`https://wa.me/${phone}?text=${message}`, "_blank", "noopener,noreferrer");
   }
 
   function clearFilters() {
@@ -1566,6 +1612,26 @@ function AdminVendasContent() {
                                 )}
 
                               <div className="d-flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  disabled={isUpdatingThisSale}
+                                  style={{
+                                    background: "#25D366",
+                                    color: "#fff",
+                                    borderRadius: 999,
+                                    fontWeight: 700,
+                                    boxShadow: "0 8px 18px rgba(37, 211, 102, 0.24)",
+                                    opacity: isUpdatingThisSale ? 0.7 : 1,
+                                  }}
+                                  onClick={() => openWhatsApp(sale)}
+                                  title="Enviar mensagem para o cliente no WhatsApp"
+                                  aria-label="Enviar mensagem para o cliente no WhatsApp"
+                                >
+                                  <WhatsAppIcon size={15} />{" "}
+                                  WhatsApp
+                                </button>
+
                                 <button
                                   type="button"
                                   className="btn btn-sm"
