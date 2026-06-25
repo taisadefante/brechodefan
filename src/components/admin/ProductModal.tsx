@@ -16,7 +16,15 @@ type NumberOrEmpty = number | "";
 
 type ProductForm = Omit<
   Product,
-  "id" | "price" | "stock" | "weight" | "height" | "width" | "length"
+  | "id"
+  | "price"
+  | "stock"
+  | "weight"
+  | "height"
+  | "width"
+  | "length"
+  | "costPrice"
+  | "desiredMargin"
 > & {
   price: NumberOrEmpty;
   stock: NumberOrEmpty;
@@ -24,11 +32,11 @@ type ProductForm = Omit<
   height: NumberOrEmpty;
   width: NumberOrEmpty;
   length: NumberOrEmpty;
+  costPrice?: NumberOrEmpty;
+  desiredMargin?: NumberOrEmpty;
   shippingProfile?: ShippingProfile | "";
   type?: string;
   subtype?: string;
-  costPrice?: NumberOrEmpty;
-  desiredMargin?: NumberOrEmpty;
 };
 
 const CROP_PREVIEW_SIZE = 520;
@@ -857,7 +865,6 @@ export default function ProductModal({
           <div className="row g-3">
             <div className="col-md-8">
               <label className="form-label">Nome</label>
-
               <input
                 className="form-control"
                 value={form.name}
@@ -867,7 +874,6 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Valor de venda</label>
-
               <input
                 className="form-control"
                 type="number"
@@ -885,7 +891,6 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Custo do produto</label>
-
               <input
                 className="form-control"
                 type="number"
@@ -903,7 +908,6 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Margem desejada (%)</label>
-
               <input
                 className="form-control"
                 type="number"
@@ -922,7 +926,6 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Resultado</label>
-
               <div
                 style={{
                   background: "#fff",
@@ -941,7 +944,6 @@ export default function ProductModal({
 
             <div className="col-12">
               <label className="form-label">Descrição</label>
-
               <textarea
                 className="form-control"
                 rows={3}
@@ -956,7 +958,6 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Perfil de frete</label>
-
               <select
                 className="form-select"
                 value={form.shippingProfile || DEFAULT_SHIPPING_PROFILE}
@@ -972,7 +973,6 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Estoque</label>
-
               <input
                 className="form-control"
                 type="number"
@@ -990,7 +990,6 @@ export default function ProductModal({
 
             <div className="col-md-4">
               <label className="form-label">Status</label>
-
               <select
                 className="form-select"
                 value={form.status}
@@ -1010,7 +1009,6 @@ export default function ProductModal({
 
             <div className="col-12">
               <label className="form-label">Medidas da peça</label>
-
               <input
                 className="form-control"
                 placeholder="Ex: comprimento, largura, busto, cintura..."
