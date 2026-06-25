@@ -36,9 +36,38 @@ function shuffleProducts(list: Product[]) {
   return [...list].sort(() => Math.random() - 0.5);
 }
 
+function getPaginationItems(currentPage: number, totalPages: number) {
+  const maxVisible = 5;
+  const items: Array<number | "..."> = [];
+
+  let start = Math.max(1, currentPage - 2);
+  let end = start + maxVisible - 1;
+
+  if (end > totalPages) {
+    end = totalPages;
+    start = Math.max(1, end - maxVisible + 1);
+  }
+
+  for (let i = start; i <= end; i++) {
+    items.push(i);
+  }
+
+  if (end < totalPages) {
+    items.push("...");
+  }
+
+  return items;
+}
+
 function WhatsAppOfficialIcon({ size = 22 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="currentColor">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      fill="currentColor"
+      aria-hidden="true"
+    >
       <path d="M16.04 3C8.86 3 3.03 8.82 3.03 15.99c0 2.29.6 4.53 1.74 6.5L3 29l6.68-1.75a12.9 12.9 0 0 0 6.36 1.67h.01c7.17 0 13-5.83 13-13S23.22 3 16.04 3Zm0 23.72h-.01c-1.95 0-3.86-.52-5.53-1.5l-.4-.24-3.96 1.04 1.06-3.86-.26-.4a10.68 10.68 0 0 1-1.64-5.77c0-5.94 4.83-10.77 10.77-10.77 2.88 0 5.58 1.12 7.61 3.16a10.7 10.7 0 0 1 3.15 7.61c0 5.94-4.83 10.77-10.77 10.77Zm5.9-8.06c-.32-.16-1.9-.94-2.2-1.05-.29-.11-.5-.16-.72.16-.21.32-.83 1.05-1.02 1.27-.19.21-.38.24-.7.08-.32-.16-1.36-.5-2.59-1.6-.96-.85-1.6-1.9-1.79-2.22-.19-.32-.02-.49.14-.65.14-.14.32-.38.48-.56.16-.19.21-.32.32-.54.11-.21.05-.4-.03-.56-.08-.16-.72-1.73-.99-2.37-.26-.62-.52-.54-.72-.55h-.61c-.21 0-.56.08-.85.4-.29.32-1.12 1.09-1.12 2.66s1.15 3.09 1.31 3.3c.16.21 2.26 3.45 5.48 4.84.77.33 1.36.52 1.83.67.77.24 1.47.21 2.02.13.62-.09 1.9-.78 2.17-1.53.27-.75.27-1.39.19-1.53-.08-.13-.29-.21-.61-.37Z" />
     </svg>
   );
@@ -54,6 +83,7 @@ function HomeContent() {
   async function loadProducts() {
     const list = await getProducts(true);
     const availableProducts = list.filter(isProductAvailable);
+
     setProducts(shuffleProducts(availableProducts));
   }
 
@@ -68,6 +98,7 @@ function HomeContent() {
   const filtered = useMemo(() => {
     return products.filter((product) => {
       if (!isProductAvailable(product)) return false;
+
       return productMatchesFilters(product, search, filters);
     });
   }, [products, search, filters]);
@@ -78,6 +109,8 @@ function HomeContent() {
     (page - 1) * ITEMS_PER_PAGE,
     page * ITEMS_PER_PAGE,
   );
+
+  const paginationItems = getPaginationItems(page, totalPages);
 
   return (
     <main style={{ background: "#f8efe3" }}>
@@ -125,6 +158,21 @@ function HomeContent() {
           display: flex;
           flex-wrap: wrap;
           gap: 10px;
+        }
+
+        .pagination-mobile {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 7px;
+          margin-top: 28px;
+          overflow-x: auto;
+          flex-wrap: nowrap;
+          padding: 4px 0 8px;
+        }
+
+        .pagination-mobile::-webkit-scrollbar {
+          height: 0;
         }
 
         @media (max-width: 991px) {
@@ -259,7 +307,10 @@ function HomeContent() {
           borderBottom: "1px solid rgba(92,54,34,.08)",
         }}
       >
-        <div className="container-fluid px-3 px-md-5 py-4" style={{ maxWidth: 1540 }}>
+        <div
+          className="container-fluid px-3 px-md-5 py-4"
+          style={{ maxWidth: 1540 }}
+        >
           <div className="row g-3">
             {[
               {
@@ -333,106 +384,14 @@ function HomeContent() {
         </div>
       </section>
 
-      <section className="py-5">
-        <div className="container-fluid px-3 px-md-5" style={{ maxWidth: 1540 }}>
-          <div className="text-center mb-4">
-            <span
-              className="badge mb-3"
-              style={{
-                background: "#fff",
-                color: theme.brown,
-                borderRadius: 999,
-                padding: "9px 14px",
-              }}
-            >
-              Comprar de brechó vale a pena
-            </span>
-
-            <h2 className="fw-bold">
-              Achadinhos únicos para consumir melhor e gastar menos.
-            </h2>
-
-            <p
-              className="mx-auto mt-3"
-              style={{
-                maxWidth: 760,
-                color: theme.brownSoft,
-                fontSize: 16,
-              }}
-            >
-              Cada peça tem uma nova chance de circular, ganhar uma nova história
-              e deixar seu guarda-roupa mais bonito sem pesar no bolso.
-            </p>
-          </div>
-
-          <div className="row g-3">
-            {[
-              {
-                icon: <Tag size={24} />,
-                title: "Preço amigo",
-                text: "Desapegos com valores acessíveis.",
-              },
-              {
-                icon: <Heart size={24} />,
-                title: "Curadoria cuidadosa",
-                text: "Peças selecionadas com atenção.",
-              },
-              {
-                icon: <ShieldCheck size={24} />,
-                title: "Compra prática",
-                text: "Veja, escolha e finalize com facilidade.",
-              },
-              {
-                icon: <Recycle size={24} />,
-                title: "Consumo consciente",
-                text: "Mais estilo com menos desperdício.",
-              },
-            ].map((item) => (
-              <div className="col-12 col-md-6 col-xl-3" key={item.title}>
-                <div
-                  style={{
-                    height: "100%",
-                    background: "#fff",
-                    borderRadius: 20,
-                    padding: 22,
-                    boxShadow: "0 12px 30px rgba(92,54,34,.07)",
-                    border: "1px solid rgba(92,54,34,.08)",
-                  }}
-                >
-                  <div
-                    className="mb-3"
-                    style={{
-                      width: 50,
-                      height: 50,
-                      borderRadius: 17,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: theme.ivory,
-                      color: theme.brown,
-                    }}
-                  >
-                    {item.icon}
-                  </div>
-
-                  <h3 className="h6 fw-bold">{item.title}</h3>
-
-                  <p className="mb-0" style={{ color: theme.brownSoft, fontSize: 14 }}>
-                    {item.text}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="produtos" className="pb-5">
-        <div className="container-fluid px-3 px-md-5" style={{ maxWidth: 1540 }}>
+      <section id="produtos" className="pb-5 pt-5">
+        <div
+          className="container-fluid px-3 px-md-5"
+          style={{ maxWidth: 1540 }}
+        >
           <div className="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
             <div>
               <h2 className="fw-bold mb-2">Escolha seu próximo desapego</h2>
-
               <p className="mb-0" style={{ color: theme.brownSoft }}>
                 Use os filtros para encontrar peças por categoria, tipo,
                 tamanho, preço e cor.
@@ -505,46 +464,87 @@ function HomeContent() {
           </div>
 
           {totalPages > 1 && (
-            <div className="d-flex flex-wrap justify-content-center gap-2 mt-5">
+            <div className="pagination-mobile">
               <button
                 type="button"
-                className="btn btn-outline-secondary"
                 disabled={page === 1}
                 onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                style={{ borderRadius: 999 }}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: page === 1 ? "#c9b8a8" : theme.brown,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  padding: "0 6px",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                  cursor: page === 1 ? "default" : "pointer",
+                }}
               >
-                Anterior
+                ←
               </button>
 
-              {Array.from({ length: totalPages }).map((_, index) => {
-                const pageNumber = index + 1;
-
-                return (
-                  <button
-                    type="button"
-                    key={pageNumber}
-                    className="btn"
-                    onClick={() => setPage(pageNumber)}
+              {paginationItems.map((item, index) =>
+                item === "..." ? (
+                  <span
+                    key={`dots-${index}`}
                     style={{
-                      borderRadius: 999,
-                      background: pageNumber === page ? theme.brown : "transparent",
-                      color: pageNumber === page ? "#fff" : theme.brown,
-                      border: `1px solid ${theme.brown}`,
+                      height: 30,
+                      minWidth: 22,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: theme.brown,
+                      fontWeight: 800,
+                      fontSize: 12,
+                      flexShrink: 0,
                     }}
                   >
-                    {pageNumber}
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    key={item}
+                    onClick={() => setPage(item)}
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: "50%",
+                      border: `1px solid ${
+                        page === item ? theme.brown : "rgba(92,54,34,.16)"
+                      }`,
+                      background: page === item ? theme.brown : "#fff",
+                      color: page === item ? "#fff" : theme.brown,
+                      fontSize: 12,
+                      fontWeight: 800,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {item}
                   </button>
-                );
-              })}
+                ),
+              )}
 
               <button
                 type="button"
-                className="btn btn-outline-secondary"
                 disabled={page === totalPages}
-                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                style={{ borderRadius: 999 }}
+                onClick={() =>
+                  setPage((prev) => Math.min(totalPages, prev + 1))
+                }
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: page === totalPages ? "#c9b8a8" : theme.brown,
+                  fontSize: 14,
+                  fontWeight: 800,
+                  padding: "0 6px",
+                  whiteSpace: "nowrap",
+                  flexShrink: 0,
+                  cursor: page === totalPages ? "default" : "pointer",
+                }}
               >
-                Próxima
+                →
               </button>
             </div>
           )}
