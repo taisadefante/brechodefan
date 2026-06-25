@@ -38,13 +38,7 @@ function shuffleProducts(list: Product[]) {
 
 function WhatsAppOfficialIcon({ size = 22 }: { size?: number }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="currentColor"
-      aria-hidden="true"
-    >
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="currentColor">
       <path d="M16.04 3C8.86 3 3.03 8.82 3.03 15.99c0 2.29.6 4.53 1.74 6.5L3 29l6.68-1.75a12.9 12.9 0 0 0 6.36 1.67h.01c7.17 0 13-5.83 13-13S23.22 3 16.04 3Zm0 23.72h-.01c-1.95 0-3.86-.52-5.53-1.5l-.4-.24-3.96 1.04 1.06-3.86-.26-.4a10.68 10.68 0 0 1-1.64-5.77c0-5.94 4.83-10.77 10.77-10.77 2.88 0 5.58 1.12 7.61 3.16a10.7 10.7 0 0 1 3.15 7.61c0 5.94-4.83 10.77-10.77 10.77Zm5.9-8.06c-.32-.16-1.9-.94-2.2-1.05-.29-.11-.5-.16-.72.16-.21.32-.83 1.05-1.02 1.27-.19.21-.38.24-.7.08-.32-.16-1.36-.5-2.59-1.6-.96-.85-1.6-1.9-1.79-2.22-.19-.32-.02-.49.14-.65.14-.14.32-.38.48-.56.16-.19.21-.32.32-.54.11-.21.05-.4-.03-.56-.08-.16-.72-1.73-.99-2.37-.26-.62-.52-.54-.72-.55h-.61c-.21 0-.56.08-.85.4-.29.32-1.12 1.09-1.12 2.66s1.15 3.09 1.31 3.3c.16.21 2.26 3.45 5.48 4.84.77.33 1.36.52 1.83.67.77.24 1.47.21 2.02.13.62-.09 1.9-.78 2.17-1.53.27-.75.27-1.39.19-1.53-.08-.13-.29-.21-.61-.37Z" />
     </svg>
   );
@@ -60,7 +54,6 @@ function HomeContent() {
   async function loadProducts() {
     const list = await getProducts(true);
     const availableProducts = list.filter(isProductAvailable);
-
     setProducts(shuffleProducts(availableProducts));
   }
 
@@ -75,7 +68,6 @@ function HomeContent() {
   const filtered = useMemo(() => {
     return products.filter((product) => {
       if (!isProductAvailable(product)) return false;
-
       return productMatchesFilters(product, search, filters);
     });
   }, [products, search, filters]);
@@ -89,15 +81,94 @@ function HomeContent() {
 
   return (
     <main style={{ background: "#f8efe3" }}>
-      <section
-        style={{
-          background: `linear-gradient(135deg, ${theme.brownDark}, ${theme.brown})`,
-          color: theme.ivory,
-          padding: "76px 0",
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
+      <style jsx>{`
+        .hero-section {
+          background: linear-gradient(135deg, ${theme.brownDark}, ${theme.brown});
+          color: ${theme.ivory};
+          padding: 76px 0;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .hero-title {
+          font-size: clamp(2.1rem, 5vw, 4.3rem);
+          line-height: 1.05;
+          font-weight: 800;
+          letter-spacing: -0.04em;
+        }
+
+        .hero-text {
+          max-width: 760px;
+          color: rgba(255, 255, 255, 0.88);
+          font-size: 1.18rem;
+          line-height: 1.55;
+        }
+
+        .hero-logo-box {
+          min-height: 320px;
+          border-radius: 30px;
+          overflow: hidden;
+          box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+          border: 1px solid rgba(255, 255, 255, 0.18);
+          background: linear-gradient(
+            145deg,
+            rgba(255, 255, 255, 0.95),
+            rgba(255, 244, 225, 0.82)
+          );
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 34px;
+        }
+
+        .hero-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+
+        @media (max-width: 991px) {
+          .hero-section {
+            padding: 54px 0 44px;
+            text-align: center;
+          }
+
+          .hero-text {
+            margin-left: auto;
+            margin-right: auto;
+            font-size: 1rem;
+          }
+
+          .hero-actions {
+            justify-content: center;
+          }
+
+          .hero-logo-box {
+            min-height: 230px;
+            max-width: 430px;
+            margin: 0 auto;
+            padding: 24px;
+            border-radius: 24px;
+          }
+        }
+
+        @media (max-width: 575px) {
+          .hero-section {
+            padding: 42px 0 34px;
+          }
+
+          .hero-title {
+            font-size: 2.15rem;
+          }
+
+          .hero-actions a {
+            width: 100%;
+            justify-content: center;
+          }
+        }
+      `}</style>
+
+      <section className="hero-section">
         <div
           className="container-fluid px-3 px-md-5 position-relative"
           style={{ maxWidth: 1540 }}
@@ -114,29 +185,23 @@ function HomeContent() {
                 }}
               >
                 <Sparkles size={14} className="me-1" />
-                Brechó, desapego e moda circular
+                Brechó online • desapegos selecionados
               </span>
 
-              <h1 className="display-4 fw-bold mb-3">
-                Peças selecionadas para você comprar bem, gastar menos e renovar
-                o guarda-roupa.
+              <h1 className="hero-title mb-3">
+                Desapegos lindos, preços leves e peças escolhidas com carinho.
               </h1>
 
-              <p
-                className="lead mb-4"
-                style={{
-                  maxWidth: 760,
-                  color: "rgba(255,255,255,.88)",
-                }}
-              >
-                No Defan Brechó você encontra roupas, acessórios e produtos de
-                desapego em bom estado, com curadoria e preços especiais.
+              <p className="hero-text mb-4">
+                Garimpe roupas, acessórios e achadinhos em bom estado para
+                renovar seu estilo gastando menos. Comprar de brechó é econômico,
+                consciente e cheio de personalidade.
               </p>
 
-              <div className="d-flex flex-wrap gap-2">
+              <div className="hero-actions">
                 <a
                   href="#produtos"
-                  className="btn btn-lg fw-semibold"
+                  className="btn btn-lg fw-semibold d-inline-flex align-items-center"
                   style={{
                     background: theme.ivory,
                     color: theme.brownDark,
@@ -145,12 +210,12 @@ function HomeContent() {
                   }}
                 >
                   <ShoppingBag size={18} className="me-2" />
-                  Ver produtos
+                  Ver desapegos
                 </a>
 
                 <a
                   href="#como-funciona"
-                  className="btn btn-lg fw-semibold"
+                  className="btn btn-lg fw-semibold d-inline-flex align-items-center"
                   style={{
                     background: "rgba(255,255,255,.12)",
                     color: theme.ivory,
@@ -160,27 +225,13 @@ function HomeContent() {
                   }}
                 >
                   <Recycle size={18} className="me-2" />
-                  Como funciona
+                  Como comprar
                 </a>
               </div>
             </div>
 
             <div className="col-lg-5">
-              <div
-                style={{
-                  minHeight: 320,
-                  borderRadius: 30,
-                  overflow: "hidden",
-                  boxShadow: "0 24px 60px rgba(0,0,0,.25)",
-                  border: "1px solid rgba(255,255,255,.18)",
-                  background:
-                    "linear-gradient(145deg, rgba(255,255,255,.95), rgba(255,244,225,.82))",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: 34,
-                }}
-              >
+              <div className="hero-logo-box">
                 <Image
                   src="/logo-defan-brecho.png"
                   alt="Defan Brechó"
@@ -208,31 +259,28 @@ function HomeContent() {
           borderBottom: "1px solid rgba(92,54,34,.08)",
         }}
       >
-        <div
-          className="container-fluid px-3 px-md-5 py-4"
-          style={{ maxWidth: 1540 }}
-        >
+        <div className="container-fluid px-3 px-md-5 py-4" style={{ maxWidth: 1540 }}>
           <div className="row g-3">
             {[
               {
                 icon: <Truck size={22} />,
                 title: "Entrega flexível",
-                text: "Escolha no carrinho: Correios, transportadora, retirada em Realengo ou Uber/99.",
+                text: "Combine entrega, retirada em Realengo ou envio conforme disponibilidade.",
               },
               {
                 icon: <CreditCard size={22} />,
-                title: "Pagamento Mercado Pago",
-                text: "Pagamento seguro por cartão, PIX e saldo Mercado Pago.",
+                title: "Pagamento seguro",
+                text: "Finalize sua compra com praticidade pelo Mercado Pago.",
               },
               {
                 icon: <WhatsAppOfficialIcon size={22} />,
                 title: "Atendimento via WhatsApp",
-                text: "Fale diretamente conosco para dúvidas, reservas e entregas.",
+                text: "Tire dúvidas sobre medidas, estado da peça, entrega e reserva.",
               },
               {
                 icon: <PackageCheck size={22} />,
-                title: "Produtos disponíveis",
-                text: "A vitrine exibe apenas itens ativos e disponíveis em estoque.",
+                title: "Peças disponíveis",
+                text: "A vitrine mostra apenas produtos ativos e disponíveis em estoque.",
               },
             ].map((item) => (
               <div className="col-12 col-md-6 col-xl-3" key={item.title}>
@@ -286,10 +334,7 @@ function HomeContent() {
       </section>
 
       <section className="py-5">
-        <div
-          className="container-fluid px-3 px-md-5"
-          style={{ maxWidth: 1540 }}
-        >
+        <div className="container-fluid px-3 px-md-5" style={{ maxWidth: 1540 }}>
           <div className="text-center mb-4">
             <span
               className="badge mb-3"
@@ -304,7 +349,7 @@ function HomeContent() {
             </span>
 
             <h2 className="fw-bold">
-              Mais economia, mais estilo e consumo consciente.
+              Achadinhos únicos para consumir melhor e gastar menos.
             </h2>
 
             <p
@@ -315,8 +360,8 @@ function HomeContent() {
                 fontSize: 16,
               }}
             >
-              Peças selecionadas, preços acessíveis e uma forma mais inteligente
-              de renovar o guarda-roupa.
+              Cada peça tem uma nova chance de circular, ganhar uma nova história
+              e deixar seu guarda-roupa mais bonito sem pesar no bolso.
             </p>
           </div>
 
@@ -324,13 +369,13 @@ function HomeContent() {
             {[
               {
                 icon: <Tag size={24} />,
-                title: "Preços especiais",
-                text: "Produtos com valores acessíveis.",
+                title: "Preço amigo",
+                text: "Desapegos com valores acessíveis.",
               },
               {
                 icon: <Heart size={24} />,
-                title: "Curadoria com cuidado",
-                text: "Peças escolhidas com atenção.",
+                title: "Curadoria cuidadosa",
+                text: "Peças selecionadas com atenção.",
               },
               {
                 icon: <ShieldCheck size={24} />,
@@ -339,8 +384,8 @@ function HomeContent() {
               },
               {
                 icon: <Recycle size={24} />,
-                title: "Moda circular",
-                text: "Consumo mais consciente e sustentável.",
+                title: "Consumo consciente",
+                text: "Mais estilo com menos desperdício.",
               },
             ].map((item) => (
               <div className="col-12 col-md-6 col-xl-3" key={item.title}>
@@ -372,10 +417,7 @@ function HomeContent() {
 
                   <h3 className="h6 fw-bold">{item.title}</h3>
 
-                  <p
-                    className="mb-0"
-                    style={{ color: theme.brownSoft, fontSize: 14 }}
-                  >
+                  <p className="mb-0" style={{ color: theme.brownSoft, fontSize: 14 }}>
                     {item.text}
                   </p>
                 </div>
@@ -386,17 +428,14 @@ function HomeContent() {
       </section>
 
       <section id="produtos" className="pb-5">
-        <div
-          className="container-fluid px-3 px-md-5"
-          style={{ maxWidth: 1540 }}
-        >
+        <div className="container-fluid px-3 px-md-5" style={{ maxWidth: 1540 }}>
           <div className="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
             <div>
-              <h2 className="fw-bold mb-2">Escolha sua próxima peça</h2>
+              <h2 className="fw-bold mb-2">Escolha seu próximo desapego</h2>
 
               <p className="mb-0" style={{ color: theme.brownSoft }}>
-                Use os filtros para encontrar produtos por categoria, tipo,
-                subtipo, tamanho, preço e cor.
+                Use os filtros para encontrar peças por categoria, tipo,
+                tamanho, preço e cor.
               </p>
             </div>
 
@@ -408,7 +447,7 @@ function HomeContent() {
                 borderRadius: 999,
                 background: "#fff",
                 color: theme.brown,
-                border: `1px solid rgba(92,54,34,.18)`,
+                border: "1px solid rgba(92,54,34,.18)",
                 padding: "10px 18px",
               }}
             >
@@ -424,7 +463,7 @@ function HomeContent() {
             setFilters={setFilters}
           />
 
-          <div className="d-flex justify-content-between align-items-center mb-3">
+          <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
             <p className="mb-0" style={{ color: theme.brownSoft }}>
               {filtered.length} produto(s) encontrado(s)
             </p>
@@ -434,9 +473,12 @@ function HomeContent() {
             </p>
           </div>
 
-          <div className="row g-3">
+          <div className="row g-4 justify-content-center">
             {paginatedProducts.map((product) => (
-              <div className="col-6 col-md-4 col-xl-3" key={product.id}>
+              <div
+                className="col-12 col-md-6 col-lg-4 col-xl-3"
+                key={product.id}
+              >
                 <ProductCard
                   product={product}
                   onView={() => setSelectedProduct(product)}
@@ -456,7 +498,7 @@ function HomeContent() {
                     border: "1px solid rgba(92,54,34,.08)",
                   }}
                 >
-                  Nenhum produto disponível foi encontrado com esses filtros.
+                  Nenhum desapego disponível foi encontrado com esses filtros.
                 </div>
               </div>
             )}
@@ -485,8 +527,7 @@ function HomeContent() {
                     onClick={() => setPage(pageNumber)}
                     style={{
                       borderRadius: 999,
-                      background:
-                        pageNumber === page ? theme.brown : "transparent",
+                      background: pageNumber === page ? theme.brown : "transparent",
                       color: pageNumber === page ? "#fff" : theme.brown,
                       border: `1px solid ${theme.brown}`,
                     }}
@@ -500,9 +541,7 @@ function HomeContent() {
                 type="button"
                 className="btn btn-outline-secondary"
                 disabled={page === totalPages}
-                onClick={() =>
-                  setPage((prev) => Math.min(totalPages, prev + 1))
-                }
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
                 style={{ borderRadius: 999 }}
               >
                 Próxima
