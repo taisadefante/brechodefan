@@ -135,23 +135,16 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
         .product-title {
           color: ${theme.brownDark};
           line-height: 1.25;
-          min-height: 28px;
+          min-height: 42px;
           font-size: 1.05rem;
-          margin-bottom: 4px;
-        }
-
-        .product-price {
-          color: ${theme.brown};
-          font-weight: 800;
-          font-size: 1.25rem;
-          margin-bottom: 12px;
+          margin-bottom: 10px;
         }
 
         .details-list {
           display: flex;
           flex-wrap: wrap;
           gap: 7px;
-          margin-bottom: 16px;
+          margin-bottom: 14px;
         }
 
         .detail-pill {
@@ -165,10 +158,34 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
           word-break: break-word;
         }
 
+        .price-section {
+          margin-top: auto;
+          padding-top: 14px;
+          border-top: 1px solid #eadfce;
+          margin-bottom: 14px;
+        }
+
+        .price-label {
+          display: block;
+          font-size: 11px;
+          color: ${theme.brownSoft};
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          font-weight: 800;
+          margin-bottom: 5px;
+        }
+
+        .product-price {
+          color: ${theme.brown};
+          font-weight: 900;
+          font-size: 1.75rem;
+          line-height: 1;
+          margin: 0;
+        }
+
         .actions {
           display: flex;
           gap: 8px;
-          margin-top: auto;
         }
 
         .action-btn {
@@ -225,23 +242,28 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
             font-size: 0.98rem;
             text-align: center;
             min-height: auto;
-          }
-
-          .product-price {
-            font-size: 1.18rem;
-            text-align: center;
             margin-bottom: 10px;
           }
 
           .details-list {
             justify-content: center;
             gap: 6px;
-            margin-bottom: 14px;
+            margin-bottom: 12px;
           }
 
           .detail-pill {
             font-size: 11px;
             padding: 5px 8px;
+          }
+
+          .price-section {
+            text-align: center;
+            padding-top: 12px;
+            margin-bottom: 12px;
+          }
+
+          .product-price {
+            font-size: 1.55rem;
           }
 
           .actions {
@@ -323,8 +345,6 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
             <h5 className="fw-bold product-title">{product.name}</h5>
           )}
 
-          <p className="product-price">{formatMoney(product.price)}</p>
-
           {details.length > 0 && (
             <div className="details-list">
               {details.map(([label, value], itemIndex) => (
@@ -337,6 +357,11 @@ export default function ProductCard({ product, onView }: ProductCardProps) {
               ))}
             </div>
           )}
+
+          <div className="price-section">
+            <span className="price-label">Preço</span>
+            <p className="product-price">{formatMoney(product.price)}</p>
+          </div>
 
           <div className="actions">
             {onView && (
