@@ -156,10 +156,10 @@ function ensureOption(options: string[], value: string) {
 function createInitialCrop(): Crop {
   return {
     unit: "%",
-    x: 8,
-    y: 8,
-    width: 84,
-    height: 84,
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
   };
 }
 
@@ -1171,8 +1171,8 @@ export default function ProductModal({
                   <p className="fw-bold mb-1">Editar nova imagem</p>
 
                   <small style={{ color: theme.brownSoft }}>
-                    No celular, toque e arraste as bolinhas brancas para diminuir
-                    altura e largura.
+                    A imagem já vem inteira selecionada. Se quiser cortar,
+                    ajuste manualmente pelas bolinhas brancas.
                   </small>
 
                   <div
@@ -1201,9 +1201,11 @@ export default function ProductModal({
                         ref={imageRef}
                         src={cropSrc}
                         alt="Cortar"
-                        onLoad={() => {
+                        onLoad={(event) => {
+                          const image = event.currentTarget;
+
                           setCrop(createInitialCrop());
-                          setCompletedCrop(null);
+                          setCompletedCrop(createFullImagePixelCrop(image));
                         }}
                         style={{
                           width: "100%",
@@ -1237,12 +1239,17 @@ export default function ProductModal({
                       className="btn btn-sm btn-outline-secondary"
                       disabled={uploading || saving}
                       onClick={() => {
+                        if (imageRef.current) {
+                          setCompletedCrop(
+                            createFullImagePixelCrop(imageRef.current),
+                          );
+                        }
+
                         setCrop(createInitialCrop());
-                        setCompletedCrop(null);
                       }}
                       style={{ borderRadius: 999 }}
                     >
-                      Resetar corte
+                      Selecionar foto inteira
                     </button>
 
                     <button

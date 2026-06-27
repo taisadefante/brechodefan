@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  Download,
   Eye,
   EyeOff,
   Lock,
@@ -10,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  X,
 } from "lucide-react";
 
 import {
@@ -50,19 +52,18 @@ function calculateProfit(product: Product) {
   return salePrice - costPrice;
 }
 
-function calculateMargin(product: Product) {
-  const salePrice = Number(product.price || 0);
-  const profit = calculateProfit(product);
-
-  if (salePrice <= 0) return 0;
-
-  return (profit / salePrice) * 100;
-}
-
 function formatPercent(value: number) {
   if (!Number.isFinite(value)) return "0,00%";
-
   return `${value.toFixed(2).replace(".", ",")}%`;
+}
+
+function safeFileName(name: string) {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9-_]/g, "-")
+    .replace(/-+/g, "-")
+    .toLowerCase();
 }
 
 function AdminProdutosContent() {
@@ -75,6 +76,11 @@ function AdminProdutosContent() {
   const [updatingProductId, setUpdatingProductId] = useState<string | null>(
     null,
   );
+
+  const [imageModal, setImageModal] = useState<{
+    src: string;
+    name: string;
+  } | null>(null);
 
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>({});
@@ -110,6 +116,17 @@ function AdminProdutosContent() {
   useEffect(() => {
     setPage(1);
   }, [search, filters]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setImageModal(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   async function handleAdminLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -171,6 +188,31 @@ function AdminProdutosContent() {
       alert("Erro ao atualizar status do produto.");
     } finally {
       setUpdatingProductId(null);
+    }
+  }
+
+  async function handleDownloadImage(src: string, name: string) {
+    try {
+      const response = await fetch(src, { mode: "cors" });
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `${safeFileName(name || "produto")}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error("Erro ao salvar imagem:", error);
+
+      const link = document.createElement("a");
+      link.href = src;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.click();
     }
   }
 
@@ -505,25 +547,47 @@ function AdminProdutosContent() {
                 const isUpdating = updatingProductId === product.id;
                 const costPrice = Number(product.costPrice || 0);
                 const salePrice = Number(product.price || 0);
-                const profit = salePrice - costPrice;
+                const profit = calculateProfit(product);
                 const margin = salePrice > 0 ? (profit / salePrice) * 100 : 0;
+                const firstImage = product.images?.[0];
 
                 return (
                   <tr key={product.id}>
                     <td style={{ minWidth: 260 }}>
                       <div className="d-flex align-items-center gap-2">
-                        {product.images?.[0] ? (
-                          <img
-                            src={product.images[0]}
-                            alt={product.name}
+                        {firstImage ? (
+                          <button
+                            type="button"
+                            title="Abrir imagem"
+                            onClick={() =>
+                              setImageModal({
+                                src: firstImage,
+                                name: product.name,
+                              })
+                            }
                             style={{
                               width: 58,
                               height: 58,
-                              objectFit: "cover",
+                              border: 0,
+                              padding: 0,
                               borderRadius: 14,
-                              background: "#f3eadf",
+                              background: "transparent",
+                              cursor: "zoom-in",
+                              overflow: "hidden",
                             }}
-                          />
+                          >
+                            <img
+                              src={firstImage}
+                              alt={product.name}
+                              style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "cover",
+                                background: "#f3eadf",
+                                display: "block",
+                              }}
+                            />
+                          </button>
                         ) : (
                           <div
                             style={{
@@ -732,6 +796,118 @@ function AdminProdutosContent() {
           </div>
         )}
       </section>
+
+      {imageModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setImageModal(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0, 0, 0, 0.78)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 18,
+          }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: "min(980px, 100%)",
+              maxHeight: "92vh",
+              background: theme.ivory2,
+              borderRadius: 24,
+              overflow: "hidden",
+              boxShadow: "0 24px 80px rgba(0,0,0,0.35)",
+              border: `1px solid ${theme.border}`,
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <div
+              className="d-flex align-items-center justify-content-between gap-2"
+              style={{
+                padding: "12px 14px",
+                borderBottom: `1px solid ${theme.border}`,
+              }}
+            >
+              <strong
+                style={{
+                  color: theme.brownDark,
+                  fontSize: 15,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {imageModal.name}
+              </strong>
+
+              <div className="d-flex align-items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() =>
+                    handleDownloadImage(imageModal.src, imageModal.name)
+                  }
+                  style={{
+                    background: theme.brown,
+                    color: "#fff",
+                    borderRadius: 999,
+                    fontWeight: 700,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Download size={15} />
+                  Salvar
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-secondary"
+                  onClick={() => setImageModal(null)}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: "50%",
+                    padding: 0,
+                  }}
+                >
+                  <X size={17} />
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: 14,
+                background: "#120f0c",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "auto",
+              }}
+            >
+              <img
+                src={imageModal.src}
+                alt={imageModal.name}
+                style={{
+                  maxWidth: "100%",
+                  maxHeight: "78vh",
+                  objectFit: "contain",
+                  borderRadius: 16,
+                  display: "block",
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <ProductModal
