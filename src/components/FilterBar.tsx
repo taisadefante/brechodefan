@@ -1,124 +1,96 @@
 "use client";
 
-import { Search, SlidersHorizontal, X } from "lucide-react";
-
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Search, X } from "lucide-react";
 import { Product } from "@/types";
-import { normalizeText } from "@/lib/utils";
 import { theme } from "@/lib/theme";
-
-export type ProductFilters = {
-  category?: string;
-  type?: string;
-  subtype?: string;
-  size?: string;
-  age?: string;
-  color?: string;
-  gender?: string;
-  brand?: string;
-  condition?: string;
-  minPrice?: string;
-  maxPrice?: string;
-};
 
 type FilterBarProps = {
   products: Product[];
   search: string;
   setSearch: (value: string) => void;
-  filters: ProductFilters;
-  setFilters: (value: ProductFilters) => void;
+  filters: Record<string, string>;
+  setFilters: React.Dispatch<React.SetStateAction<Record<string, string>>>;
 };
 
-function uniqueValues(products: Product[], key: keyof Product) {
-  return Array.from(
-    new Set(
-      products
-        .map((product) => String(product[key] || "").trim())
-        .filter(Boolean),
-    ),
-  ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+const filterFields = [
+  "category",
+  "type",
+  "subtype",
+  "size",
+  "age",
+  "gender",
+  "status",
+  "brand",
+];
+
+const filterLabels: Record<string, string> = {
+  category: "Categoria",
+  type: "Tipo",
+  subtype: "Subtipo",
+  size: "Tamanho",
+  age: "Idade",
+  gender: "Sexo",
+  status: "Status",
+  brand: "Marca",
+};
+
+function normalize(value?: string | number | null) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
 }
 
-function filteredOptionsByCurrentSelection(
-  products: Product[],
-  filters: ProductFilters,
-  key: keyof Product,
-) {
-  return products.filter((product) => {
-    if (key !== "category" && filters.category) {
-      if (product.category !== filters.category) return false;
-    }
+function statusLabel(value: string) {
+  if (value === "disponivel") return "Disponível";
+  if (value === "reservado") return "Reservado";
+  if (value === "vendido") return "Vendido";
+  if (value === "arquivado") return "Arquivado";
+  return value;
+}
 
-    if (key !== "type" && filters.type) {
-      if (product.type !== filters.type) return false;
-    }
+function getProductValue(product: Product, field: string) {
+  const value = product[field as keyof Product];
 
-    if (key !== "subtype" && filters.subtype) {
-      if (product.subtype !== filters.subtype) return false;
-    }
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
 
-    return true;
-  });
+  return "";
 }
 
 export function productMatchesFilters(
   product: Product,
   search: string,
-  filters: ProductFilters,
+  filters: Record<string, string>,
 ) {
-  const text = normalizeText(
+  const searchTerm = normalize(search);
+
+  const searchableText = normalize(
     [
       product.name,
-      product.description,
+      product.brand,
       product.category,
       product.type,
       product.subtype,
       product.size,
       product.age,
-      product.color,
       product.gender,
-      product.brand,
-      product.condition,
-      product.measurements,
-    ]
-      .filter(Boolean)
-      .join(" "),
+      product.status,
+    ].join(" "),
   );
 
-  const searchOk = !search || text.includes(normalizeText(search));
+  const matchesSearch = !searchTerm || searchableText.includes(searchTerm);
 
-  const categoryOk = !filters.category || product.category === filters.category;
-  const typeOk = !filters.type || product.type === filters.type;
-  const subtypeOk = !filters.subtype || product.subtype === filters.subtype;
-  const sizeOk = !filters.size || product.size === filters.size;
-  const ageOk = !filters.age || product.age === filters.age;
-  const colorOk = !filters.color || product.color === filters.color;
-  const genderOk = !filters.gender || product.gender === filters.gender;
-  const brandOk = !filters.brand || product.brand === filters.brand;
-  const conditionOk =
-    !filters.condition || product.condition === filters.condition;
+  const matchesFilters = Object.entries(filters).every(([field, value]) => {
+    if (!value) return true;
 
-  const price = Number(product.price || 0);
+    return normalize(getProductValue(product, field)) === normalize(value);
+  });
 
-  const minPriceOk =
-    !filters.minPrice || price >= Number(filters.minPrice || 0);
-
-  const maxPriceOk =
-    !filters.maxPrice || price <= Number(filters.maxPrice || 0);
-
-  return (
-    searchOk &&
-    categoryOk &&
-    typeOk &&
-    subtypeOk &&
-    sizeOk &&
-    ageOk &&
-    colorOk &&
-    genderOk &&
-    brandOk &&
-    conditionOk &&
-    minPriceOk &&
-    maxPriceOk
-  );
+  return matchesSearch && matchesFilters;
 }
 
 export default function FilterBar({
@@ -128,243 +100,317 @@ export default function FilterBar({
   filters,
   setFilters,
 }: FilterBarProps) {
-  const categoryProducts = filteredOptionsByCurrentSelection(
-    products,
-    filters,
-    "category",
-  );
+  const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  const typeProducts = filteredOptionsByCurrentSelection(
-    products,
-    filters,
-    "type",
-  );
+  const optionsByField = useMemo(() => {
+    const result: Record<string, string[]> = {};
 
-  const subtypeProducts = filteredOptionsByCurrentSelection(
-    products,
-    filters,
-    "subtype",
-  );
+    filterFields.forEach((field) => {
+      result[field] = Array.from(
+        new Set(
+          products
+            .map((product) => getProductValue(product, field))
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    });
 
-  const sizeProducts = filteredOptionsByCurrentSelection(
-    products,
-    filters,
-    "size",
-  );
+    return result;
+  }, [products]);
 
-  const ageProducts = filteredOptionsByCurrentSelection(
-    products,
-    filters,
-    "age",
-  );
+  const activeCount = Object.values(filters).filter(Boolean).length;
 
-  const fields: {
-    key: keyof ProductFilters;
-    label: string;
-    options: string[];
-    disabled?: boolean;
-  }[] = [
-    {
-      key: "category",
-      label: "Categoria",
-      options: uniqueValues(categoryProducts, "category"),
-    },
-    {
-      key: "type",
-      label: "Tipo",
-      options: uniqueValues(typeProducts, "type"),
-    },
-    {
-      key: "subtype",
-      label: "Subtipo",
-      options: uniqueValues(subtypeProducts, "subtype"),
-    },
-    {
-      key: "gender",
-      label: "Sexo",
-      options: uniqueValues(products, "gender"),
-    },
-    {
-      key: "size",
-      label: "Tamanho",
-      options: uniqueValues(sizeProducts, "size"),
-      disabled: !filters.category,
-    },
-    {
-      key: "age",
-      label: "Idade",
-      options: uniqueValues(ageProducts, "age"),
-      disabled: !filters.category,
-    },
-    {
-      key: "color",
-      label: "Cor",
-      options: uniqueValues(products, "color"),
-    },
-    {
-      key: "brand",
-      label: "Marca",
-      options: uniqueValues(products, "brand"),
-    },
-    {
-      key: "condition",
-      label: "Estado",
-      options: uniqueValues(products, "condition"),
-    },
-  ];
+  function calculateMenuPosition(field: string) {
+    const button = buttonRefs.current[field];
+    if (!button) return;
 
-  function updateFilter(key: keyof ProductFilters, value: string) {
-    const nextFilters: ProductFilters = {
-      ...filters,
-      [key]: value,
-    };
+    const rect = button.getBoundingClientRect();
+    const menuWidth = 240;
+    const padding = 12;
 
-    if (key === "category") {
-      nextFilters.type = "";
-      nextFilters.subtype = "";
-      nextFilters.size = "";
-      nextFilters.age = "";
-    }
-
-    if (key === "type") {
-      nextFilters.subtype = "";
-      nextFilters.size = "";
-      nextFilters.age = "";
-    }
-
-    if (key === "subtype") {
-      nextFilters.size = "";
-      nextFilters.age = "";
-    }
-
-    setFilters(nextFilters);
+    setMenuPosition({
+      top: rect.bottom + 8,
+      left: Math.max(
+        padding,
+        Math.min(rect.left, window.innerWidth - menuWidth - padding),
+      ),
+    });
   }
 
-  function clearFilters() {
+  function openMenu(field: string) {
+    calculateMenuPosition(field);
+    setOpenFilter((current) => (current === field ? null : field));
+  }
+
+  function updateFilter(field: string, value: string) {
+    setFilters((current) => {
+      const next = { ...current };
+
+      if (!value) delete next[field];
+      else next[field] = value;
+
+      return next;
+    });
+
+    setOpenFilter(null);
+  }
+
+  function clearAll() {
     setSearch("");
     setFilters({});
+    setOpenFilter(null);
   }
 
-  const hasFilters =
-    Boolean(search) || Object.values(filters).some((value) => Boolean(value));
+  useEffect(() => {
+    function closeOnOutsideClick(event: MouseEvent) {
+      const target = event.target as HTMLElement;
+
+      if (
+        target.closest("[data-filter-button]") ||
+        target.closest("[data-filter-menu]")
+      ) {
+        return;
+      }
+
+      setOpenFilter(null);
+    }
+
+    function reposition() {
+      if (openFilter) calculateMenuPosition(openFilter);
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [openFilter]);
 
   return (
-    <div
+    <section
       className="mb-4"
       style={{
-        background: "#fffaf3",
+        width: "100%",
+        maxWidth: 1320,
+        margin: "0 auto",
+        background: theme.ivory2,
         borderRadius: 26,
-        padding: 18,
-        boxShadow: "0 14px 34px rgba(92,54,34,.08)",
+        boxShadow: theme.shadow,
         border: `1px solid ${theme.border}`,
+        padding: 16,
+        position: "relative",
+        zIndex: 20,
       }}
     >
-      <div className="d-flex align-items-center gap-2 mb-3">
-        <SlidersHorizontal size={20} color={theme.brown} />
+      <div
+        className="d-flex align-items-center gap-2 mb-3"
+        style={{
+          background: "#fff",
+          border: `1px solid ${theme.border}`,
+          borderRadius: 999,
+          padding: "11px 16px",
+        }}
+      >
+        <Search size={17} color={theme.brownSoft} />
 
-        <h5 className="fw-bold mb-0">Filtros</h5>
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Buscar produto, marca, categoria..."
+          style={{
+            border: 0,
+            outline: 0,
+            background: "transparent",
+            width: "100%",
+            fontSize: 14,
+            color: theme.brownDark,
+          }}
+        />
 
-        {hasFilters && (
+        {(search || activeCount > 0) && (
           <button
             type="button"
-            className="btn btn-sm ms-auto"
-            onClick={clearFilters}
+            onClick={clearAll}
             style={{
-              borderRadius: 999,
-              background: theme.ivory,
+              border: 0,
+              background: "transparent",
               color: theme.brown,
-              border: `1px solid ${theme.border}`,
+              fontWeight: 800,
+              fontSize: 13,
+              whiteSpace: "nowrap",
             }}
           >
-            <X size={14} className="me-1" />
             Limpar
           </button>
         )}
       </div>
 
-      <div className="row g-2">
-        <div className="col-12 col-lg-4">
-          <div className="input-group">
-            <span
-              className="input-group-text"
-              style={{
-                background: theme.ivory,
-                borderColor: theme.border,
-                borderRadius: "999px 0 0 999px",
-              }}
-            >
-              <Search size={17} />
-            </span>
+      <div
+        style={{
+          width: "100%",
+          overflowX: "auto",
+          overflowY: "hidden",
+          scrollbarWidth: "none",
+          msOverflowStyle: "none",
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "nowrap",
+            gap: 10,
+            width: "max-content",
+            minWidth: "100%",
+            justifyContent: "center",
+            alignItems: "center",
+            paddingBottom: 8,
+          }}
+        >
+          {filterFields.map((field) => {
+            const options = optionsByField[field] || [];
+            const selectedValue = filters[field];
 
-            <input
-              className="form-control"
-              placeholder="Buscar produto, marca, cor..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              style={{
-                borderColor: theme.border,
-                borderRadius: "0 999px 999px 0",
-              }}
-            />
-          </div>
-        </div>
+            if (!options.length) return null;
 
-        {fields.map((field) => (
-          <div className="col-6 col-md-4 col-lg-2" key={field.key}>
-            <select
-              className="form-select"
-              value={filters[field.key] || ""}
-              disabled={field.disabled}
-              onChange={(event) => updateFilter(field.key, event.target.value)}
+            return (
+              <button
+                key={field}
+                data-filter-button="true"
+                ref={(element) => {
+                  buttonRefs.current[field] = element;
+                }}
+                type="button"
+                onClick={() => openMenu(field)}
+                style={{
+                  flex: "0 0 auto",
+                  border: `1px solid ${
+                    selectedValue ? theme.brown : theme.border
+                  }`,
+                  background: selectedValue ? theme.brown : "#fff",
+                  color: selectedValue ? "#fff" : theme.brownDark,
+                  borderRadius: 999,
+                  padding: "9px 15px",
+                  fontSize: 13,
+                  fontWeight: 800,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 8px 20px rgba(0,0,0,0.06)",
+                  cursor: "pointer",
+                }}
+              >
+                {selectedValue
+                  ? `${filterLabels[field]}: ${
+                      field === "status"
+                        ? statusLabel(selectedValue)
+                        : selectedValue
+                    }`
+                  : filterLabels[field]}
+
+                <ChevronDown size={15} />
+              </button>
+            );
+          })}
+
+          {activeCount > 0 && (
+            <button
+              type="button"
+              onClick={clearAll}
               style={{
+                flex: "0 0 auto",
+                border: `1px solid ${theme.border}`,
+                background: "#fff",
+                color: theme.brown,
                 borderRadius: 999,
-                borderColor: theme.border,
-                color: theme.brownDark,
+                padding: "9px 15px",
+                fontSize: 13,
+                fontWeight: 800,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                whiteSpace: "nowrap",
+                cursor: "pointer",
               }}
             >
-              <option value="">
-                {field.disabled ? "Selecione categoria" : field.label}
-              </option>
-
-              {field.options.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-        ))}
-
-        <div className="col-6 col-md-4 col-lg-2">
-          <input
-            className="form-control"
-            type="number"
-            min="0"
-            placeholder="Preço mín."
-            value={filters.minPrice || ""}
-            onChange={(event) => updateFilter("minPrice", event.target.value)}
-            style={{
-              borderRadius: 999,
-              borderColor: theme.border,
-            }}
-          />
-        </div>
-
-        <div className="col-6 col-md-4 col-lg-2">
-          <input
-            className="form-control"
-            type="number"
-            min="0"
-            placeholder="Preço máx."
-            value={filters.maxPrice || ""}
-            onChange={(event) => updateFilter("maxPrice", event.target.value)}
-            style={{
-              borderRadius: 999,
-              borderColor: theme.border,
-            }}
-          />
+              <X size={14} />
+              Limpar filtros
+            </button>
+          )}
         </div>
       </div>
-    </div>
+
+      {openFilter && (
+        <div
+          data-filter-menu="true"
+          style={{
+            position: "fixed",
+            top: menuPosition.top,
+            left: menuPosition.left,
+            zIndex: 99999,
+            width: 240,
+            maxHeight: 280,
+            overflowY: "auto",
+            background: "#fff",
+            borderRadius: 18,
+            border: `1px solid ${theme.border}`,
+            boxShadow: "0 18px 45px rgba(0,0,0,0.18)",
+            padding: 8,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => updateFilter(openFilter, "")}
+            style={{
+              width: "100%",
+              border: 0,
+              background: "transparent",
+              textAlign: "left",
+              padding: "10px 11px",
+              borderRadius: 12,
+              fontSize: 13,
+              fontWeight: 800,
+              color: theme.brownSoft,
+              cursor: "pointer",
+            }}
+          >
+            Todos
+          </button>
+
+          {(optionsByField[openFilter] || []).map((option) => {
+            const active = filters[openFilter] === option;
+
+            return (
+              <button
+                type="button"
+                key={option}
+                onClick={() => updateFilter(openFilter, option)}
+                style={{
+                  width: "100%",
+                  border: 0,
+                  background: active ? theme.ivory : "transparent",
+                  textAlign: "left",
+                  padding: "10px 11px",
+                  borderRadius: 12,
+                  fontSize: 13,
+                  fontWeight: active ? 900 : 600,
+                  color: theme.brownDark,
+                  cursor: "pointer",
+                }}
+              >
+                {openFilter === "status" ? statusLabel(option) : option}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
