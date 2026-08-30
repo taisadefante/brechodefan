@@ -36,6 +36,19 @@ type RequestPayload = {
   items?: CartRequestItem[];
 };
 
+type ProductDocument = Record<string, unknown>;
+
+type SaleItem = ProductDocument & {
+  id: string;
+  name: string;
+  price: number;
+  costPrice: number;
+  stock: number;
+  status: string;
+  quantity: number;
+  addedAt: number;
+};
+
 const DELIVERY_LABELS: Record<DeliveryOption, string> = {
   retirada_realengo: "Retirada em Realengo",
   retirada_centro: "Retirada no Centro",
@@ -60,6 +73,7 @@ function text(value: unknown) {
 
 function number(value: unknown) {
   const parsed = Number(value);
+
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -73,10 +87,13 @@ function cleanObject<T>(value: T): T {
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
 
-    Object.entries(value as Record<string, unknown>).forEach(([key, item]) => {
-      if (item === undefined) return;
-      result[key] = cleanObject(item);
-    });
+    Object.entries(value as Record<string, unknown>).forEach(
+      ([key, item]) => {
+        if (item === undefined) return;
+
+        result[key] = cleanObject(item);
+      },
+    );
 
     return result as T;
   }
@@ -94,8 +111,12 @@ export async function POST(request: Request) {
 
     if (!customerName) {
       return NextResponse.json(
-        { error: "Informe o nome do cliente." },
-        { status: 400 },
+        {
+          error: "Informe o nome do cliente.",
+        },
+        {
+          status: 400,
+        },
       );
     }
 
@@ -104,36 +125,57 @@ export async function POST(request: Request) {
       !ALLOWED_DELIVERY_OPTIONS.has(deliveryOption)
     ) {
       return NextResponse.json(
-        { error: "Forma de entrega inválida." },
-        { status: 400 },
+        {
+          error: "Forma de entrega inválida.",
+        },
+        {
+          status: 400,
+        },
       );
     }
 
-    const requestedItems = Array.isArray(body.items) ? body.items : [];
+    const requestedItems = Array.isArray(body.items)
+      ? body.items
+      : [];
 
     if (!requestedItems.length) {
       return NextResponse.json(
-        { error: "O carrinho está vazio." },
-        { status: 400 },
+        {
+          error: "O carrinho está vazio.",
+        },
+        {
+          status: 400,
+        },
       );
     }
 
     const normalizedRequestedItems = requestedItems
       .map((item) => ({
         id: text(item.id),
-        quantity: Math.max(Math.trunc(number(item.quantity) || 1), 1),
+
+        quantity: Math.max(
+          Math.trunc(number(item.quantity) || 1),
+          1,
+        ),
       }))
-      .filter((item) => item.id);
+      .filter((item) => Boolean(item.id));
 
     if (!normalizedRequestedItems.length) {
       return NextResponse.json(
-        { error: "Nenhum produto válido foi informado." },
-        { status: 400 },
+        {
+          error: "Nenhum produto válido foi informado.",
+        },
+        {
+          status: 400,
+        },
       );
     }
 
-    const isShipping = deliveryOption.startsWith("envio_");
-    const deliveryLabel = DELIVERY_LABELS[deliveryOption];
+    const isShipping =
+      deliveryOption.startsWith("envio_");
+
+    const deliveryLabel =
+      DELIVERY_LABELS[deliveryOption];
 
     const address = body.address || null;
 
@@ -142,8 +184,13 @@ export async function POST(request: Request) {
 
       if (cep.length !== 8) {
         return NextResponse.json(
-          { error: "Informe um CEP válido para o envio." },
-          { status: 400 },
+          {
+            error:
+              "Informe um CEP válido para o envio.",
+          },
+          {
+            status: 400,
+          },
         );
       }
 
@@ -155,169 +202,397 @@ export async function POST(request: Request) {
         !text(address?.state)
       ) {
         return NextResponse.json(
-          { error: "Preencha o endereço completo para o envio." },
-          { status: 400 },
+          {
+            error:
+              "Preencha o endereço completo para o envio.",
+          },
+          {
+            status: 400,
+          },
         );
       }
     }
 
     /*
-     * Os preços e dados dos produtos são lidos novamente do Firestore.
-     * Assim o navegador não decide o preço da venda.
+     * Busca novamente os produtos diretamente
+     * no Firestore.
+     *
+     * Dessa forma o preço utilizado na venda
+     * é sempre o preço cadastrado no sistema.
+     *
+     * IMPORTANTE:
+     * apenas consulta o estoque.
+     * NÃO diminui estoque.
      */
     const productSnapshots = await Promise.all(
       normalizedRequestedItems.map((item) =>
-        adminDb.collection("products").doc(item.id).get(),
+        adminDb
+          .collection("products")
+          .doc(item.id)
+          .get(),
       ),
     );
 
-    const saleItems = normalizedRequestedItems.map((requestedItem, index) => {
-      const snapshot = productSnapshots[index];
+    const saleItems: SaleItem[] =
+      normalizedRequestedItems.map(
+        (requestedItem, index) => {
+          const snapshot =
+            productSnapshots[index];
 
-      if (!snapshot.exists) {
-        throw new Error(
-          `O produto ${requestedItem.id} não foi encontrado.`,
+          if (!snapshot || !snapshot.exists) {
+            throw new Error(
+              `O produto ${requestedItem.id} não foi encontrado.`,
+            );
+          }
+
+          const product = (
+            snapshot.data() || {}
+          ) as ProductDocument;
+
+          const productName =
+            text(product.name) ||
+            requestedItem.id;
+
+          const productPrice =
+            number(product.price);
+
+          const productCostPrice =
+            number(product.costPrice);
+
+          const productStock = Math.max(
+            number(product.stock),
+            0,
+          );
+
+          const productStatus =
+            text(product.status);
+
+          if (
+            requestedItem.quantity >
+            productStock
+          ) {
+            throw new Error(
+              `O produto "${productName}" possui somente ${productStock} unidade(s) disponível(is).`,
+            );
+          }
+
+          if (
+            productStatus === "vendido" ||
+            productStock <= 0
+          ) {
+            throw new Error(
+              `O produto "${productName}" não está mais disponível.`,
+            );
+          }
+
+          /*
+           * Aqui price e costPrice são definidos
+           * explicitamente.
+           *
+           * Isso corrige o erro:
+           *
+           * Property 'price' does not exist...
+           */
+          const saleItem: SaleItem = {
+            ...product,
+
+            id: snapshot.id,
+
+            name: productName,
+
+            price: productPrice,
+
+            costPrice: productCostPrice,
+
+            stock: productStock,
+
+            status: productStatus,
+
+            quantity:
+              requestedItem.quantity,
+
+            addedAt: Date.now(),
+          };
+
+          return cleanObject(saleItem);
+        },
+      );
+
+    /*
+     * Total dos produtos
+     */
+    const subtotal = saleItems.reduce(
+      (sum, item) => {
+        const quantity = Math.max(
+          number(item.quantity),
+          1,
         );
-      }
 
-      const product = snapshot.data() || {};
-      const stock = Math.max(number(product.stock), 0);
-
-      if (requestedItem.quantity > stock) {
-        throw new Error(
-          `O produto "${text(product.name) || requestedItem.id}" possui somente ${stock} unidade(s) disponível(is).`,
+        return (
+          sum +
+          item.price * quantity
         );
-      }
+      },
+      0,
+    );
 
-      if (String(product.status || "") === "vendido" || stock <= 0) {
-        throw new Error(
-          `O produto "${text(product.name) || requestedItem.id}" não está mais disponível.`,
+    /*
+     * Custo total dos produtos
+     */
+    const productsCost =
+      saleItems.reduce((sum, item) => {
+        const quantity = Math.max(
+          number(item.quantity),
+          1,
         );
-      }
 
-      return cleanObject({
-        id: snapshot.id,
-        ...product,
-        quantity: requestedItem.quantity,
-        addedAt: Date.now(),
-      });
-    });
-
-    const subtotal = saleItems.reduce((sum, item) => {
-      return sum + number(item.price) * Math.max(number(item.quantity), 1);
-    }, 0);
-
-    const productsCost = saleItems.reduce((sum, item) => {
-      return sum + number(item.costPrice) * Math.max(number(item.quantity), 1);
-    }, 0);
+        return (
+          sum +
+          item.costPrice * quantity
+        );
+      }, 0);
 
     const customer = {
       name: customerName,
+
       email: "",
+
       phone: "",
+
       document: "",
-      cep: isShipping ? onlyNumbers(address?.cep) : "",
-      address: isShipping ? text(address?.address) : "",
-      number: isShipping ? text(address?.number) : "",
-      complement: isShipping ? text(address?.complement) : "",
-      district: isShipping ? text(address?.district) : "",
-      city: isShipping ? text(address?.city) : "",
-      state: isShipping ? text(address?.state).toUpperCase() : "",
+
+      cep: isShipping
+        ? onlyNumbers(address?.cep)
+        : "",
+
+      address: isShipping
+        ? text(address?.address)
+        : "",
+
+      number: isShipping
+        ? text(address?.number)
+        : "",
+
+      complement: isShipping
+        ? text(address?.complement)
+        : "",
+
+      district: isShipping
+        ? text(address?.district)
+        : "",
+
+      city: isShipping
+        ? text(address?.city)
+        : "",
+
+      state: isShipping
+        ? text(address?.state).toUpperCase()
+        : "",
     };
 
-    const shippingAddress = isShipping
-      ? {
-          id: "checkout-whatsapp",
-          userId: "whatsapp_guest",
-          name: "Endereço informado no carrinho",
-          recipientName: customerName,
-          phone: "",
-          cep: onlyNumbers(address?.cep),
-          address: text(address?.address),
-          number: text(address?.number),
-          complement: text(address?.complement),
-          district: text(address?.district),
-          city: text(address?.city),
-          state: text(address?.state).toUpperCase(),
-          isDefault: false,
-        }
-      : null;
+    const shippingAddress =
+      isShipping
+        ? {
+            id: "checkout-whatsapp",
+
+            userId:
+              "whatsapp_guest",
+
+            name:
+              "Endereço informado no carrinho",
+
+            recipientName:
+              customerName,
+
+            phone: "",
+
+            cep: onlyNumbers(
+              address?.cep,
+            ),
+
+            address: text(
+              address?.address,
+            ),
+
+            number: text(
+              address?.number,
+            ),
+
+            complement: text(
+              address?.complement,
+            ),
+
+            district: text(
+              address?.district,
+            ),
+
+            city: text(
+              address?.city,
+            ),
+
+            state: text(
+              address?.state,
+            ).toUpperCase(),
+
+            isDefault: false,
+          }
+        : null;
 
     const shippingOption = {
       id: deliveryOption,
+
       name: deliveryLabel,
-      company: isShipping ? "Entrega a combinar" : "Retirada",
+
+      company: isShipping
+        ? "Entrega a combinar"
+        : "Retirada",
+
       price: 0,
+
       deliveryTime: null,
+
       currency: "BRL",
     };
 
     const now = Date.now();
 
     const saleData = cleanObject({
+      /*
+       * Como não existe login do cliente,
+       * usamos um identificador padrão.
+       */
       userId: "whatsapp_guest",
+
       customer,
+
       shippingAddress,
+
+      /*
+       * Produtos completos ficam salvos
+       * dentro da venda.
+       */
       items: saleItems,
 
       subtotal,
-      deliveryType: isShipping ? "envio" : "retirada",
+
+      deliveryType: isShipping
+        ? "envio"
+        : "retirada",
+
       deliveryPrice: 0,
+
       shippingOption,
+
       total: subtotal,
 
-      productsRevenue: subtotal,
-      productsCost,
-      shippingRevenue: 0,
-      shippingCostPaidByStore: 0,
-      shippingCost: 0,
-      grossProfit: subtotal - productsCost,
-      netProfit: subtotal - productsCost,
+      productsRevenue:
+        subtotal,
 
-      status: "aguardando_pagamento",
+      productsCost,
+
+      shippingRevenue: 0,
+
+      shippingCostPaidByStore: 0,
+
+      shippingCost: 0,
+
+      grossProfit:
+        subtotal - productsCost,
+
+      netProfit:
+        subtotal - productsCost,
+
+      /*
+       * Status inicial
+       */
+      status:
+        "aguardando_pagamento",
+
       createdAt: now,
+
       updatedAt: now,
 
+      /*
+       * Não utiliza Mercado Pago
+       */
       paymentUrl: "",
+
       mercadoPagoPreferenceId: "",
+
       paymentGeneratedAt: 0,
 
+      /*
+       * Dados de envio
+       */
       melhorEnvioOrderId: "",
+
       melhorEnvioPrintUrl: "",
+
       trackingCode: "",
 
       /*
-       * Este pedido aparece em Vendas, mas não reserva nem diminui estoque.
+       * MUITO IMPORTANTE:
+       *
+       * Esse pedido aparece em Vendas,
+       * mas NÃO diminui o estoque.
        */
       inventoryProcessed: false,
+
       inventoryRestored: false,
+
       manageStock: false,
 
-      saleSource: "whatsapp_cart",
-      deliveryMethodLabel: deliveryLabel,
+      /*
+       * Identifica que veio do
+       * carrinho / WhatsApp
+       */
+      saleSource:
+        "whatsapp_cart",
+
+      deliveryMethodLabel:
+        deliveryLabel,
+
+      /*
+       * Observações
+       */
       observation,
+
       internalNotes: "",
+
       completedAt: null,
     });
 
-    const saleRef = await adminDb.collection("sales").add(saleData);
+    /*
+     * Registra finalmente em Vendas
+     */
+    const saleRef = await adminDb
+      .collection("sales")
+      .add(saleData);
 
     return NextResponse.json({
       ok: true,
+
       saleId: saleRef.id,
     });
   } catch (error) {
-    console.error("Erro ao criar pedido do WhatsApp:", error);
+    console.error(
+      "Erro ao criar pedido do WhatsApp:",
+      error,
+    );
 
     return NextResponse.json(
       {
-        error: "Não foi possível registrar o pedido.",
+        error:
+          "Não foi possível registrar o pedido.",
+
         details:
           error instanceof Error
             ? error.message
             : "Erro interno desconhecido.",
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 }
