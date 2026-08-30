@@ -3,10 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Menu, Search, ShoppingCart, User, X } from "lucide-react";
+import { Menu, Search, ShoppingCart, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCart } from "@/contexts/CartContext";
-import { useAuth } from "@/contexts/AuthContext";
 import { theme } from "@/lib/theme";
 
 function formatMoney(value: number) {
@@ -22,7 +21,6 @@ export default function Navbar() {
   const searchParams = useSearchParams();
 
   const { items } = useCart();
-  const { user, logout } = useAuth();
 
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
@@ -124,45 +122,6 @@ export default function Navbar() {
             >
               Produtos
             </Link>
-
-            {user ? (
-              <>
-                <Link
-                  href="/minha-conta"
-                  className="nav-link"
-                  style={{
-                    color: theme.brownDark,
-                    fontWeight: pathname === "/minha-conta" ? 800 : 600,
-                  }}
-                >
-                  <User size={16} className="me-1" />
-                  Minha Conta
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="btn btn-outline-secondary"
-                  style={{ borderRadius: 999 }}
-                >
-                  Sair
-                </button>
-              </>
-            ) : (
-              <Link
-                href="/minha-conta"
-                className="btn"
-                style={{
-                  background: theme.brownDark,
-                  color: "#fff",
-                  borderRadius: 999,
-                  padding: "8px 18px",
-                  fontWeight: 700,
-                }}
-              >
-                Login / Cadastro
-              </Link>
-            )}
 
             <div className="d-flex align-items-center gap-2 ms-3">
               <Link
@@ -344,40 +303,6 @@ export default function Navbar() {
                 {mounted ? formatMoney(totalCart) : formatMoney(0)}
               </Link>
 
-              {user ? (
-                <>
-                  <Link
-                    href="/minha-conta"
-                    className="btn btn-light text-start"
-                    onClick={closeMenu}
-                  >
-                    Minha Conta
-                  </Link>
-
-                  <button
-                    type="button"
-                    className="btn btn-outline-secondary text-start"
-                    onClick={async () => {
-                      await logout();
-                      closeMenu();
-                    }}
-                  >
-                    Sair
-                  </button>
-                </>
-              ) : (
-                <Link
-                  href="/minha-conta"
-                  className="btn"
-                  style={{
-                    background: theme.brownDark,
-                    color: "#fff",
-                  }}
-                  onClick={closeMenu}
-                >
-                  Login / Cadastro
-                </Link>
-              )}
             </div>
           </div>
         )}

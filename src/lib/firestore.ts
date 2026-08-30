@@ -31,6 +31,18 @@ import {
 type SaleWithInventory = Sale & {
   inventoryProcessed?: boolean;
   inventoryRestored?: boolean;
+
+  // false = a venda é registrada, mas não reserva/diminui/devolve estoque.
+  manageStock?: boolean;
+
+  // Identificação opcional da origem do pedido.
+  saleSource?: "site_checkout" | "whatsapp_cart";
+
+  // Informações auxiliares do pedido enviado pelo WhatsApp.
+  deliveryMethodLabel?: string;
+  observation?: string;
+  internalNotes?: string;
+  completedAt?: number | null;
 };
 
 function saleUsesStock(status: SaleStatus) {
@@ -42,7 +54,8 @@ function saleUsesStock(status: SaleStatus) {
     "pronto_retirada",
     "enviado",
     "entregue",
-  ].includes(status);
+    "concluido",
+  ].includes(String(status));
 }
 
 function saleAlreadyShipped(status?: SaleStatus) {
@@ -126,6 +139,7 @@ function uniqueOptionNames(items: OptionDoc[]) {
 }
 
 async function reserveStockFromSale(sale: SaleWithInventory) {
+  if (sale.manageStock === false) return;
   if (sale.inventoryProcessed) return;
 
   await runTransaction(db, async (transaction) => {
@@ -155,6 +169,8 @@ async function reserveStockFromSale(sale: SaleWithInventory) {
 }
 
 async function confirmStockFromSale(sale: SaleWithInventory) {
+  if (sale.manageStock === false) return;
+
   await Promise.all(
     sale.items.map(async (item) => {
       const productRef = doc(db, "products", item.id);
@@ -176,6 +192,7 @@ async function confirmStockFromSale(sale: SaleWithInventory) {
 }
 
 async function restoreStockFromSale(sale: SaleWithInventory) {
+  if (sale.manageStock === false) return;
   if (sale.inventoryRestored) return;
 
   await runTransaction(db, async (transaction) => {
@@ -186,6 +203,7 @@ async function restoreStockFromSale(sale: SaleWithInventory) {
 
     const currentSale = saleSnap.data() as SaleWithInventory;
 
+    if (currentSale.manageStock === false) return;
     if (currentSale.inventoryRestored) return;
 
     const items = currentSale.items || sale.items || [];
@@ -490,8 +508,23 @@ export async function createSale(params: {
   paymentUrl?: string;
   mercadoPagoPreferenceId?: string;
   total?: number;
+
+  /**
+   * Por padrão a venda continua controlando o estoque.
+   * Use false nos pedidos enviados pelo carrinho/WhatsApp.
+   */
+  manageStock?: boolean;
+
+  /**
+   * Metadados opcionais para identificar a origem e os dados
+   * específicos do pedido feito pelo WhatsApp.
+   */
+  saleSource?: "site_checkout" | "whatsapp_cart";
+  deliveryMethodLabel?: string;
+  observation?: string;
 }): Promise<string> {
   const total = params.subtotal + params.deliveryPrice;
+  const manageStock = params.manageStock !== false;
 
   const saleData: Omit<SaleWithInventory, "id"> = {
     userId: params.userId,
@@ -503,40 +536,59 @@ export async function createSale(params: {
     deliveryPrice: params.deliveryPrice,
     shippingOption: params.shippingOption || null,
     total,
+
     productsRevenue: calculateProductsRevenue(params.items),
     productsCost: calculateProductsCost(params.items),
     shippingRevenue: params.deliveryPrice,
     shippingCostPaidByStore: 0,
     shippingCost: 0,
-    grossProfit: calculateProductsRevenue(params.items) - calculateProductsCost(params.items),
-    netProfit: calculateProductsRevenue(params.items) - calculateProductsCost(params.items),
+    grossProfit:
+      calculateProductsRevenue(params.items) - calculateProductsCost(params.items),
+    netProfit:
+      calculateProductsRevenue(params.items) - calculateProductsCost(params.items),
+
     status: "aguardando_pagamento",
     createdAt: Date.now(),
     updatedAt: Date.now(),
+
     paymentUrl: params.paymentUrl || "",
     mercadoPagoPreferenceId: params.mercadoPagoPreferenceId || "",
     paymentGeneratedAt: params.paymentUrl ? Date.now() : 0,
+
     melhorEnvioOrderId: "",
     melhorEnvioPrintUrl: "",
     trackingCode: "",
+
     inventoryProcessed: false,
     inventoryRestored: false,
+    manageStock,
+
+    saleSource: params.saleSource || "site_checkout",
+    deliveryMethodLabel: params.deliveryMethodLabel || "",
+    observation: params.observation || "",
   };
 
   const ref = await addDoc(collection(db, "sales"), saleData);
 
-  const sale: SaleWithInventory = {
-    id: ref.id,
-    ...saleData,
-  };
+  /**
+   * IMPORTANTE:
+   * - vendas normais continuam funcionando como antes;
+   * - carrinho/WhatsApp usa manageStock: false e apenas registra a venda.
+   */
+  if (manageStock) {
+    const sale: SaleWithInventory = {
+      id: ref.id,
+      ...saleData,
+    };
 
-  await reserveStockFromSale(sale);
+    await reserveStockFromSale(sale);
 
-  await updateDoc(doc(db, "sales", ref.id), {
-    inventoryProcessed: true,
-    inventoryRestored: false,
-    updatedAt: Date.now(),
-  });
+    await updateDoc(doc(db, "sales", ref.id), {
+      inventoryProcessed: true,
+      inventoryRestored: false,
+      updatedAt: Date.now(),
+    });
+  }
 
   return ref.id;
 }
@@ -577,9 +629,12 @@ export async function updateSaleStatus(
   } as SaleWithInventory;
 
   const previousStatus = sale.status;
+  const manageStock = sale.manageStock !== false;
 
   if (status === "cancelado") {
-    const shouldRestoreNow = !saleAlreadyShipped(previousStatus) || Boolean(sale.returnReceivedAt);
+    const shouldRestoreNow =
+      manageStock &&
+      (!saleAlreadyShipped(previousStatus) || Boolean(sale.returnReceivedAt));
 
     if (shouldRestoreNow) {
       await restoreStockFromSale(sale);
@@ -591,15 +646,31 @@ export async function updateSaleStatus(
       cancelApproved: true,
       cancelApprovedAt: Date.now(),
       canceledAt: Date.now(),
-      inventoryProcessed: shouldRestoreNow ? false : sale.inventoryProcessed || false,
-      inventoryRestored: shouldRestoreNow ? true : sale.inventoryRestored || false,
+
+      // Pedido WhatsApp não mexeu no estoque, então também não deve devolvê-lo.
+      inventoryProcessed: manageStock
+        ? shouldRestoreNow
+          ? false
+          : sale.inventoryProcessed || false
+        : false,
+
+      inventoryRestored: manageStock
+        ? shouldRestoreNow
+          ? true
+          : sale.inventoryRestored || false
+        : false,
+
       updatedAt: Date.now(),
     });
 
     return;
   }
 
-  if (sale.inventoryRestored && previousStatus === "cancelado") {
+  if (
+    manageStock &&
+    sale.inventoryRestored &&
+    previousStatus === "cancelado"
+  ) {
     await reserveStockFromSale({
       ...sale,
       inventoryProcessed: false,
@@ -607,21 +678,160 @@ export async function updateSaleStatus(
     });
   }
 
-  if (!sale.inventoryProcessed && saleUsesStock(status)) {
+  if (manageStock && !sale.inventoryProcessed && saleUsesStock(status)) {
     await reserveStockFromSale(sale);
   }
 
-  if (saleUsesStock(status)) {
+  if (manageStock && saleUsesStock(status)) {
     await confirmStockFromSale(sale);
   }
 
   await updateDoc(saleRef, {
     status,
     trackingCode: trackingCode || sale.trackingCode || "",
-    inventoryProcessed: saleUsesStock(status),
+    inventoryProcessed: manageStock ? saleUsesStock(status) : false,
     inventoryRestored: false,
+    completedAt:
+      String(status) === "concluido"
+        ? sale.completedAt || Date.now()
+        : sale.completedAt || null,
     updatedAt: Date.now(),
   });
+}
+
+
+export async function updateSaleAdminData(
+  id: string,
+  data: {
+    customer?: Partial<CustomerData>;
+    shippingAddress?:
+      | (Partial<CustomerAddress> & {
+          recipientName?: string;
+        })
+      | null;
+    deliveryType?: DeliveryType;
+    deliveryMethodLabel?: string;
+    deliveryPrice?: number;
+    shippingCostPaidByStore?: number;
+    trackingCode?: string;
+    observation?: string;
+    internalNotes?: string;
+    status?: SaleStatus | "concluido";
+  },
+): Promise<void> {
+  const saleRef = doc(db, "sales", id);
+  const saleSnap = await getDoc(saleRef);
+
+  if (!saleSnap.exists()) {
+    throw new Error("Venda não encontrada.");
+  }
+
+  const currentSale = {
+    id: saleSnap.id,
+    ...saleSnap.data(),
+  } as SaleWithInventory;
+
+  const deliveryPrice =
+    data.deliveryPrice !== undefined
+      ? Math.max(Number(data.deliveryPrice || 0), 0)
+      : Number(currentSale.deliveryPrice || 0);
+
+  const shippingCostPaidByStore =
+    data.shippingCostPaidByStore !== undefined
+      ? Math.max(Number(data.shippingCostPaidByStore || 0), 0)
+      : Number(
+          currentSale.shippingCostPaidByStore ||
+            currentSale.shippingCost ||
+            0,
+        );
+
+  const updatedCustomer = data.customer
+    ? {
+        ...currentSale.customer,
+        ...data.customer,
+      }
+    : currentSale.customer;
+
+  const currentShippingAddress = currentSale.shippingAddress || null;
+
+  const updatedShippingAddress =
+    data.shippingAddress === null
+      ? null
+      : data.shippingAddress
+        ? {
+            ...(currentShippingAddress || {
+              id: "admin-edited",
+              userId: currentSale.userId || "whatsapp_guest",
+              name: "Endereço da venda",
+              recipientName: updatedCustomer?.name || "",
+              phone: updatedCustomer?.phone || "",
+              cep: "",
+              address: "",
+              number: "",
+              complement: "",
+              district: "",
+              city: "",
+              state: "",
+              isDefault: false,
+            }),
+            ...data.shippingAddress,
+            recipientName:
+              data.shippingAddress.recipientName ||
+              updatedCustomer?.name ||
+              currentShippingAddress?.recipientName ||
+              "",
+            phone:
+              currentShippingAddress?.phone ||
+              updatedCustomer?.phone ||
+              "",
+          }
+        : currentShippingAddress;
+
+  if (data.status !== undefined) {
+    await updateSaleStatus(
+      id,
+      data.status as SaleStatus,
+      data.trackingCode ?? currentSale.trackingCode ?? "",
+    );
+  }
+
+  const currentTotal = Number(currentSale.subtotal || 0) + deliveryPrice;
+  const productsRevenue = calculateProductsRevenue(currentSale.items || []);
+  const productsCost = calculateProductsCost(currentSale.items || []);
+
+  await updateDoc(saleRef, {
+    customer: updatedCustomer,
+    shippingAddress: updatedShippingAddress,
+    deliveryType: data.deliveryType ?? currentSale.deliveryType,
+    deliveryMethodLabel:
+      data.deliveryMethodLabel ?? currentSale.deliveryMethodLabel ?? "",
+    deliveryPrice,
+    shippingRevenue: deliveryPrice,
+    shippingCostPaidByStore,
+    shippingCost: shippingCostPaidByStore,
+    trackingCode: data.trackingCode ?? currentSale.trackingCode ?? "",
+    observation: data.observation ?? currentSale.observation ?? "",
+    internalNotes: data.internalNotes ?? currentSale.internalNotes ?? "",
+    total: currentTotal,
+    productsRevenue,
+    productsCost,
+    grossProfit: productsRevenue - productsCost,
+    netProfit: productsRevenue - productsCost - shippingCostPaidByStore,
+    completedAt:
+      data.status === "concluido"
+        ? currentSale.completedAt || Date.now()
+        : currentSale.completedAt || null,
+    updatedAt: Date.now(),
+  });
+}
+
+/**
+ * Exclui apenas o registro da venda.
+ * Não altera o estoque. Isso é importante para pedidos do carrinho/WhatsApp,
+ * que são registrados com manageStock:false.
+ */
+export async function deleteSale(id: string): Promise<void> {
+  await deleteDoc(doc(db, "sales", id));
 }
 
 
@@ -691,6 +901,22 @@ export async function approveCancelSale(id: string): Promise<void> {
     ...saleSnap.data(),
   } as SaleWithInventory;
 
+  // Pedidos do WhatsApp são apenas registrados em Vendas.
+  // Como não reduziram estoque, o cancelamento não devolve estoque.
+  if (sale.manageStock === false) {
+    await updateDoc(saleRef, {
+      status: "cancelado",
+      cancelApproved: true,
+      cancelApprovedAt: Date.now(),
+      canceledAt: Date.now(),
+      inventoryProcessed: false,
+      inventoryRestored: false,
+      updatedAt: Date.now(),
+    });
+
+    return;
+  }
+
   const shouldRestoreNow = !saleAlreadyShipped(sale.status);
 
   if (shouldRestoreNow) {
@@ -746,7 +972,9 @@ export async function updateSaleReverseLabel(
   });
 }
 
-export async function markReturnReceivedAndCancelSale(id: string): Promise<void> {
+export async function markReturnReceivedAndCancelSale(
+  id: string,
+): Promise<void> {
   const saleRef = doc(db, "sales", id);
   const saleSnap = await getDoc(saleRef);
 
@@ -757,7 +985,11 @@ export async function markReturnReceivedAndCancelSale(id: string): Promise<void>
     ...saleSnap.data(),
   } as SaleWithInventory;
 
-  await restoreStockFromSale(sale);
+  const manageStock = sale.manageStock !== false;
+
+  if (manageStock) {
+    await restoreStockFromSale(sale);
+  }
 
   await updateDoc(saleRef, {
     status: "cancelado",
@@ -765,7 +997,7 @@ export async function markReturnReceivedAndCancelSale(id: string): Promise<void>
     canceledAt: Date.now(),
     reverseStatus: "produto_recebido",
     inventoryProcessed: false,
-    inventoryRestored: true,
+    inventoryRestored: manageStock,
     updatedAt: Date.now(),
   });
 }
@@ -796,7 +1028,9 @@ export async function updateSaleReverseShippingLabel(
   });
 }
 
-export async function receiveReturnedSaleProducts(id: string): Promise<void> {
+export async function receiveReturnedSaleProducts(
+  id: string,
+): Promise<void> {
   const saleRef = doc(db, "sales", id);
   const saleSnap = await getDoc(saleRef);
 
@@ -807,10 +1041,14 @@ export async function receiveReturnedSaleProducts(id: string): Promise<void> {
     ...saleSnap.data(),
   } as SaleWithInventory;
 
-  await restoreStockFromSale({
-    ...sale,
-    inventoryRestored: false,
-  });
+  const manageStock = sale.manageStock !== false;
+
+  if (manageStock) {
+    await restoreStockFromSale({
+      ...sale,
+      inventoryRestored: false,
+    });
+  }
 
   await updateDoc(saleRef, {
     status: "cancelado",
@@ -818,7 +1056,7 @@ export async function receiveReturnedSaleProducts(id: string): Promise<void> {
     canceledAt: Date.now(),
     reverseStatus: "produto_recebido",
     inventoryProcessed: false,
-    inventoryRestored: true,
+    inventoryRestored: manageStock,
     updatedAt: Date.now(),
   });
 }

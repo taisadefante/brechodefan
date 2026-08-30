@@ -2,19 +2,25 @@
 
 import { Fragment, Suspense, useEffect, useMemo, useState } from "react";
 import {
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Pencil,
   Printer,
   RefreshCw,
+  Save,
   Tag,
+  Trash2,
   X,
 } from "lucide-react";
 
 import {
   approveCancelSale,
+  deleteSale,
   getAllSales,
   receiveReturnedSaleProducts,
   updateSaleReverseShippingLabel,
+  updateSaleAdminData,
   updateSaleShippingLabel,
   updateSaleStatus,
 } from "@/lib/firestore";
@@ -34,9 +40,18 @@ type SaleItemWithCost = Sale["items"][number] & {
   costPrice?: number;
 };
 
-type SaleWithDocument = Sale & {
+type AdminSaleStatus = SaleStatus | "concluido";
+
+type SaleWithDocument = Omit<Sale, "customer" | "items" | "status"> & {
   customer: CustomerWithDocument;
   items: SaleItemWithCost[];
+  status: AdminSaleStatus;
+  manageStock?: boolean;
+  saleSource?: "site_checkout" | "whatsapp_cart";
+  deliveryMethodLabel?: string;
+  observation?: string;
+  internalNotes?: string;
+  completedAt?: number | null;
   productsRevenue?: number;
   productsCost?: number;
   shippingRevenue?: number;
@@ -62,7 +77,7 @@ type ApiResponseData = {
   reversePrintUrl?: string;
 };
 
-const statuses: SaleStatus[] = [
+const statuses: AdminSaleStatus[] = [
   "aguardando_pagamento",
   "pago",
   "separando",
@@ -70,10 +85,66 @@ const statuses: SaleStatus[] = [
   "pronto_retirada",
   "enviado",
   "entregue",
+  "concluido",
   "cancelamento_solicitado",
   "aguardando_retorno" as SaleStatus,
   "cancelado",
 ];
+
+const DELIVERY_METHODS = [
+  "Retirada em Realengo",
+  "Retirada no Centro",
+  "Retirada na Estação",
+  "Envio por Uber",
+  "Envio pelos Correios",
+  "Envio pelo Mercado Livre",
+  "Envio a combinar com a loja",
+] as const;
+
+type EditSaleForm = {
+  customerName: string;
+  status: AdminSaleStatus;
+  deliveryMethodLabel: string;
+  deliveryPrice: string;
+  shippingCostPaidByStore: string;
+  trackingCode: string;
+  observation: string;
+  internalNotes: string;
+  cep: string;
+  address: string;
+  number: string;
+  complement: string;
+  district: string;
+  city: string;
+  state: string;
+};
+
+const emptyEditSaleForm: EditSaleForm = {
+  customerName: "",
+  status: "aguardando_pagamento",
+  deliveryMethodLabel: "Envio a combinar com a loja",
+  deliveryPrice: "0",
+  shippingCostPaidByStore: "0",
+  trackingCode: "",
+  observation: "",
+  internalNotes: "",
+  cep: "",
+  address: "",
+  number: "",
+  complement: "",
+  district: "",
+  city: "",
+  state: "",
+};
+
+function adminStatusLabel(status?: string) {
+  if (status === "concluido") return "Concluído";
+  return statusLabel((status || "aguardando_pagamento") as SaleStatus);
+}
+
+function isPickupMethod(label?: string) {
+  return String(label || "").toLowerCase().startsWith("retirada");
+}
 
 function onlyNumbers(value?: string) {
   return String(value || "").replace(/\D/g, "");
@@ -286,8 +357,13 @@ function AdminVendasContent() {
     {},
   );
 
+  const [editingSale, setEditingSale] = useState<SaleWithDocument | null>(null);
+  const [editForm, setEditForm] = useState<EditSaleForm>(emptyEditSaleForm);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingSaleId, setDeletingSaleId] = useState<string | null>(null);
+
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"todos" | SaleStatus>(
+  const [statusFilter, setStatusFilter] = useState<"todos" | AdminSaleStatus>(
     "todos",
   );
   const [deliveryFilter, setDeliveryFilter] = useState("todos");
@@ -308,6 +384,9 @@ function AdminVendasContent() {
         customerDocument,
         sale.status,
         sale.deliveryType,
+        sale.deliveryMethodLabel,
+        sale.observation,
+        sale.internalNotes,
         sale.mercadoPagoPreferenceId,
       ]
         .join(" ")
@@ -389,6 +468,7 @@ function AdminVendasContent() {
     return {
       quantity: filteredSales.length,
       paid: filteredSales.filter((sale) => sale.status === "pago").length,
+      completed: filteredSales.filter((sale) => sale.status === "concluido").length,
       pending: filteredSales.filter(
         (sale) => sale.status === "aguardando_pagamento",
       ).length,
@@ -428,7 +508,7 @@ function AdminVendasContent() {
     }
   }, [adminUser, isAdmin]);
 
-  async function changeStatus(id: string, status: SaleStatus) {
+  async function changeStatus(id: string, status: AdminSaleStatus) {
     const previousSales = sales;
 
     setUpdatingSaleId(id);
@@ -447,7 +527,7 @@ function AdminVendasContent() {
     );
 
     try {
-      await updateSaleStatus(id, status, tracking[id]);
+      await updateSaleStatus(id, status as SaleStatus, tracking[id]);
       await load();
     } catch (error) {
       console.error("Erro ao atualizar status:", error);
@@ -471,6 +551,179 @@ function AdminVendasContent() {
       alert("Erro ao aprovar cancelamento.");
     } finally {
       setUpdatingSaleId(null);
+    }
+  }
+
+  function openEditSale(sale: SaleWithDocument) {
+    const address = sale.shippingAddress || null;
+    const methodLabel =
+      sale.deliveryMethodLabel ||
+      (sale.deliveryType === "retirada"
+        ? "Retirada em Realengo"
+        : "Envio a combinar com a loja");
+
+    setEditingSale(sale);
+    setEditForm({
+      customerName: sale.customer?.name || "",
+      status: sale.status,
+      deliveryMethodLabel: methodLabel,
+      deliveryPrice: String(Number(sale.deliveryPrice || 0)),
+      shippingCostPaidByStore: String(
+        Number(sale.shippingCostPaidByStore || sale.shippingCost || 0),
+      ),
+      trackingCode: sale.trackingCode || "",
+      observation: sale.observation || "",
+      internalNotes: sale.internalNotes || "",
+      cep: address?.cep || sale.customer?.cep || "",
+      address: address?.address || sale.customer?.address || "",
+      number: address?.number || sale.customer?.number || "",
+      complement: address?.complement || sale.customer?.complement || "",
+      district: address?.district || sale.customer?.district || "",
+      city: address?.city || sale.customer?.city || "",
+      state: address?.state || sale.customer?.state || "",
+    });
+  }
+
+  function closeEditSale() {
+    if (savingEdit) return;
+    setEditingSale(null);
+    setEditForm(emptyEditSaleForm);
+  }
+
+  async function saveEditedSale(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!editingSale) return;
+
+    const customerName = editForm.customerName.trim();
+
+    if (!customerName) {
+      alert("Informe o nome do cliente.");
+      return;
+    }
+
+    const pickup = isPickupMethod(editForm.deliveryMethodLabel);
+
+    if (
+      !pickup &&
+      (!editForm.cep.trim() ||
+        !editForm.address.trim() ||
+        !editForm.number.trim() ||
+        !editForm.district.trim() ||
+        !editForm.city.trim() ||
+        !editForm.state.trim())
+    ) {
+      alert("Para envio, preencha o endereço completo.");
+      return;
+    }
+
+    setSavingEdit(true);
+
+    try {
+      await updateSaleAdminData(editingSale.id, {
+        customer: {
+          name: customerName,
+          cep: pickup ? "" : editForm.cep.trim(),
+          address: pickup ? "" : editForm.address.trim(),
+          number: pickup ? "" : editForm.number.trim(),
+          complement: pickup ? "" : editForm.complement.trim(),
+          district: pickup ? "" : editForm.district.trim(),
+          city: pickup ? "" : editForm.city.trim(),
+          state: pickup ? "" : editForm.state.trim().toUpperCase(),
+        },
+        shippingAddress: pickup
+          ? null
+          : {
+              cep: editForm.cep.trim(),
+              address: editForm.address.trim(),
+              number: editForm.number.trim(),
+              complement: editForm.complement.trim(),
+              district: editForm.district.trim(),
+              city: editForm.city.trim(),
+              state: editForm.state.trim().toUpperCase(),
+              recipientName: customerName,
+            },
+        deliveryType: pickup ? "retirada" : "envio",
+        deliveryMethodLabel: editForm.deliveryMethodLabel,
+        deliveryPrice: Math.max(Number(editForm.deliveryPrice || 0), 0),
+        shippingCostPaidByStore: Math.max(
+          Number(editForm.shippingCostPaidByStore || 0),
+          0,
+        ),
+        trackingCode: editForm.trackingCode.trim(),
+        observation: editForm.observation.trim(),
+        internalNotes: editForm.internalNotes.trim(),
+        status: editForm.status,
+      });
+
+      setEditingSale(null);
+      setEditForm(emptyEditSaleForm);
+      await load();
+    } catch (error) {
+      console.error("Erro ao editar venda:", error);
+      alert("Não foi possível salvar as alterações da venda.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function markAsCompleted(sale: SaleWithDocument) {
+    if (sale.status === "concluido") return;
+
+    if (!confirm(`Marcar o pedido #${sale.id.slice(0, 8)} como concluído?`)) {
+      return;
+    }
+
+    setUpdatingSaleId(sale.id);
+
+    try {
+      await updateSaleAdminData(sale.id, {
+        status: "concluido",
+        trackingCode: tracking[sale.id] ?? sale.trackingCode ?? "",
+      });
+
+      await load();
+    } catch (error) {
+      console.error("Erro ao concluir venda:", error);
+      alert("Não foi possível concluir a venda.");
+    } finally {
+      setUpdatingSaleId(null);
+    }
+  }
+
+  async function removeSale(sale: SaleWithDocument) {
+    const sourceWarning =
+      sale.manageStock === false || sale.saleSource === "whatsapp_cart"
+        ? "Este pedido não alterou o estoque."
+        : "A exclusão remove somente o registro da venda e não altera o estoque atual.";
+
+    if (
+      !confirm(
+        `Excluir definitivamente o pedido #${sale.id.slice(0, 8)}?\n\n${sourceWarning}\n\nEssa ação não pode ser desfeita.`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingSaleId(sale.id);
+
+    try {
+      await deleteSale(sale.id);
+
+      if (openSaleId === sale.id) {
+        setOpenSaleId(null);
+      }
+
+      if (editingSale?.id === sale.id) {
+        setEditingSale(null);
+      }
+
+      await load();
+    } catch (error) {
+      console.error("Erro ao excluir venda:", error);
+      alert("Não foi possível excluir a venda.");
+    } finally {
+      setDeletingSaleId(null);
     }
   }
 
@@ -803,7 +1056,7 @@ function AdminVendasContent() {
       `Olá, ${customerName}! 😊`,
       "",
       `Aqui é do Brechó Defan. Estou entrando em contato sobre o seu pedido #${sale.id.slice(0, 8)}.`,
-      `Status atual: ${statusLabel(sale.status)}.`,
+      `Status atual: ${adminStatusLabel(sale.status)}.`,
       trackingCode ? `Código de rastreio: ${trackingCode}.` : "",
       "",
       "Qualquer dúvida, estou à disposição.",
@@ -842,6 +1095,375 @@ function AdminVendasContent() {
 
   return (
     <main className="container-fluid px-3 px-lg-4 pb-5">
+      {editingSale && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10020,
+            background: "rgba(0,0,0,.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 860,
+              maxHeight: "92vh",
+              overflowY: "auto",
+              background: theme.ivory2,
+              borderRadius: 26,
+              boxShadow: "0 24px 70px rgba(0,0,0,.28)",
+              border: `1px solid ${theme.border}`,
+              padding: 24,
+            }}
+          >
+            <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
+              <div>
+                <h3 className="fw-bold mb-1">Editar venda</h3>
+                <div style={{ color: theme.brownSoft }}>
+                  Pedido #{editingSale.id.slice(0, 8)}
+                  {editingSale.saleSource === "whatsapp_cart"
+                    ? " • Carrinho / WhatsApp"
+                    : ""}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={closeEditSale}
+                disabled={savingEdit}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: "50%",
+                  padding: 0,
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={saveEditedSale}>
+              <div className="row g-3">
+                <div className="col-12 col-md-6">
+                  <label className="form-label fw-semibold">Cliente</label>
+                  <input
+                    className="form-control"
+                    value={editForm.customerName}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        customerName: event.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </div>
+
+                <div className="col-12 col-md-6">
+                  <label className="form-label fw-semibold">Status</label>
+                  <select
+                    className="form-select"
+                    value={editForm.status}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        status: event.target.value as AdminSaleStatus,
+                      }))
+                    }
+                  >
+                    {statuses.map((status) => (
+                      <option key={status} value={status}>
+                        {adminStatusLabel(status)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="col-12 col-md-6">
+                  <label className="form-label fw-semibold">
+                    Forma de entrega
+                  </label>
+                  <select
+                    className="form-select"
+                    value={editForm.deliveryMethodLabel}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        deliveryMethodLabel: event.target.value,
+                      }))
+                    }
+                  >
+                    {DELIVERY_METHODS.map((method) => (
+                      <option value={method} key={method}>
+                        {method}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="col-6 col-md-3">
+                  <label className="form-label fw-semibold">
+                    Frete cobrado
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="form-control"
+                    value={editForm.deliveryPrice}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        deliveryPrice: event.target.value,
+                      }))
+                    }
+                  />
+                </div>
+
+                <div className="col-6 col-md-3">
+                  <label className="form-label fw-semibold">
+                    Custo do frete
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="form-control"
+                    value={editForm.shippingCostPaidByStore}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        shippingCostPaidByStore: event.target.value,
+                      }))
+                    }
+                  />
+                </div>
+
+                <div className="col-12">
+                  <label className="form-label fw-semibold">
+                    Código de rastreio
+                  </label>
+                  <input
+                    className="form-control"
+                    value={editForm.trackingCode}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        trackingCode: event.target.value,
+                      }))
+                    }
+                    placeholder="Opcional"
+                  />
+                </div>
+
+                {!isPickupMethod(editForm.deliveryMethodLabel) && (
+                  <>
+                    <div className="col-12">
+                      <div
+                        className="p-3"
+                        style={{
+                          background: "#fff",
+                          borderRadius: 18,
+                          border: `1px solid ${theme.border}`,
+                        }}
+                      >
+                        <h5 className="fw-bold mb-3">Endereço de entrega</h5>
+
+                        <div className="row g-2">
+                          <div className="col-12 col-md-4">
+                            <label className="form-label">CEP</label>
+                            <input
+                              className="form-control"
+                              value={editForm.cep}
+                              onChange={(event) =>
+                                setEditForm((prev) => ({
+                                  ...prev,
+                                  cep: event.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          <div className="col-12 col-md-8">
+                            <label className="form-label">Rua / Avenida</label>
+                            <input
+                              className="form-control"
+                              value={editForm.address}
+                              onChange={(event) =>
+                                setEditForm((prev) => ({
+                                  ...prev,
+                                  address: event.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          <div className="col-4 col-md-3">
+                            <label className="form-label">Número</label>
+                            <input
+                              className="form-control"
+                              value={editForm.number}
+                              onChange={(event) =>
+                                setEditForm((prev) => ({
+                                  ...prev,
+                                  number: event.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          <div className="col-8 col-md-5">
+                            <label className="form-label">Complemento</label>
+                            <input
+                              className="form-control"
+                              value={editForm.complement}
+                              onChange={(event) =>
+                                setEditForm((prev) => ({
+                                  ...prev,
+                                  complement: event.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          <div className="col-12 col-md-4">
+                            <label className="form-label">Bairro</label>
+                            <input
+                              className="form-control"
+                              value={editForm.district}
+                              onChange={(event) =>
+                                setEditForm((prev) => ({
+                                  ...prev,
+                                  district: event.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          <div className="col-8">
+                            <label className="form-label">Cidade</label>
+                            <input
+                              className="form-control"
+                              value={editForm.city}
+                              onChange={(event) =>
+                                setEditForm((prev) => ({
+                                  ...prev,
+                                  city: event.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+
+                          <div className="col-4">
+                            <label className="form-label">UF</label>
+                            <input
+                              className="form-control"
+                              maxLength={2}
+                              value={editForm.state}
+                              onChange={(event) =>
+                                setEditForm((prev) => ({
+                                  ...prev,
+                                  state: event.target.value.toUpperCase(),
+                                }))
+                              }
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="col-12 col-md-6">
+                  <label className="form-label fw-semibold">
+                    Observação do pedido
+                  </label>
+                  <textarea
+                    className="form-control"
+                    rows={4}
+                    value={editForm.observation}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        observation: event.target.value,
+                      }))
+                    }
+                    placeholder="Ex.: cliente pediu embalagem para presente."
+                  />
+                </div>
+
+                <div className="col-12 col-md-6">
+                  <label className="form-label fw-semibold">
+                    Observação interna da loja
+                  </label>
+                  <textarea
+                    className="form-control"
+                    rows={4}
+                    value={editForm.internalNotes}
+                    onChange={(event) =>
+                      setEditForm((prev) => ({
+                        ...prev,
+                        internalNotes: event.target.value,
+                      }))
+                    }
+                    placeholder="Essa observação fica somente na administração."
+                  />
+                </div>
+              </div>
+
+              <div
+                className="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-4 pt-3"
+                style={{ borderTop: `1px solid ${theme.border}` }}
+              >
+                <div>
+                  <small style={{ color: theme.brownSoft }}>
+                    Total após o frete
+                  </small>
+                  <div className="fw-bold fs-5">
+                    {formatMoney(
+                      Number(editingSale.subtotal || 0) +
+                        Math.max(Number(editForm.deliveryPrice || 0), 0),
+                    )}
+                  </div>
+                </div>
+
+                <div className="d-flex gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary"
+                    onClick={closeEditSale}
+                    disabled={savingEdit}
+                    style={{ borderRadius: 999 }}
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="btn"
+                    disabled={savingEdit}
+                    style={{
+                      background: theme.brown,
+                      color: "#fff",
+                      borderRadius: 999,
+                    }}
+                  >
+                    <Save size={16} className="me-1" />
+                    {savingEdit ? "Salvando..." : "Salvar alterações"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {saleToGenerateLabel && (
         <div
           style={{
@@ -967,7 +1589,7 @@ function AdminVendasContent() {
           <div>
             <h1 className="fw-bold mb-1">Vendas</h1>
             <p className="mb-0" style={{ color: theme.brownSoft }}>
-              Acompanhe pedidos, faturamento, custo, lucro e margem.
+              Gerencie pedidos, edite dados, acompanhe status e finalize vendas.
             </p>
           </div>
 
@@ -993,6 +1615,7 @@ function AdminVendasContent() {
         {[
           ["Vendas filtradas", totals.quantity],
           ["Pagas", totals.paid],
+          ["Concluídas", totals.completed],
           ["Aguardando pagamento", totals.pending],
           ["Total com frete", formatMoney(totals.revenue)],
           ["Venda produtos", formatMoney(totals.productsRevenue)],
@@ -1054,14 +1677,14 @@ function AdminVendasContent() {
                 className="form-select"
                 value={statusFilter}
                 onChange={(event) =>
-                  setStatusFilter(event.target.value as "todos" | SaleStatus)
+                  setStatusFilter(event.target.value as "todos" | AdminSaleStatus)
                 }
               >
                 <option value="todos">Todos</option>
 
                 {statuses.map((status) => (
                   <option key={status} value={status}>
-                    {statusLabel(status)}
+                    {adminStatusLabel(status)}
                   </option>
                 ))}
               </select>
@@ -1147,7 +1770,7 @@ function AdminVendasContent() {
                 <th>Lucro</th>
                 <th>Margem</th>
                 <th>Status</th>
-                <th style={{ width: 90, textAlign: "center" }}>Detalhes</th>
+                <th style={{ minWidth: 150, textAlign: "center" }}>Ações</th>
               </tr>
             </thead>
 
@@ -1184,9 +1807,11 @@ function AdminVendasContent() {
                       <td>
                         <strong>#{sale.id.slice(0, 8)}</strong>
                         <div style={{ fontSize: 12, color: theme.brownSoft }}>
-                          {sale.mercadoPagoPreferenceId
-                            ? `MP: ${sale.mercadoPagoPreferenceId}`
-                            : "Sem preferência MP"}
+                          {sale.saleSource === "whatsapp_cart"
+                            ? "Pedido pelo WhatsApp/site"
+                            : sale.mercadoPagoPreferenceId
+                              ? `MP: ${sale.mercadoPagoPreferenceId}`
+                              : "Venda cadastrada"}
                         </div>
                       </td>
 
@@ -1210,7 +1835,26 @@ function AdminVendasContent() {
                         <strong>{sale.items?.length || 0}</strong>
                       </td>
 
-                      <td>{deliveryTypeLabel(sale.deliveryType)}</td>
+                      <td style={{ minWidth: 180 }}>
+                        <strong>
+                          {sale.deliveryMethodLabel ||
+                            deliveryTypeLabel(sale.deliveryType)}
+                        </strong>
+                        {sale.saleSource === "whatsapp_cart" && (
+                          <div>
+                            <span
+                              className="badge mt-1"
+                              style={{
+                                background: "#dcfce7",
+                                color: "#166534",
+                                borderRadius: 999,
+                              }}
+                            >
+                              WhatsApp/site
+                            </span>
+                          </div>
+                        )}
+                      </td>
 
                       <td>
                         <strong>{formatMoney(sale.total || 0)}</strong>
@@ -1255,7 +1899,7 @@ function AdminVendasContent() {
                           onChange={(event) =>
                             changeStatus(
                               sale.id,
-                              event.target.value as SaleStatus,
+                              event.target.value as AdminSaleStatus,
                             )
                           }
                           style={{
@@ -1267,7 +1911,7 @@ function AdminVendasContent() {
                         >
                           {statuses.map((status) => (
                             <option key={status} value={status}>
-                              {statusLabel(status)}
+                              {adminStatusLabel(status)}
                             </option>
                           ))}
                         </select>
@@ -1280,25 +1924,60 @@ function AdminVendasContent() {
                       </td>
 
                       <td className="text-center">
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-secondary"
-                          onClick={() =>
-                            setOpenSaleId(isOpen ? null : sale.id)
-                          }
-                          style={{
-                            width: 38,
-                            height: 38,
-                            borderRadius: "50%",
-                            padding: 0,
-                          }}
-                        >
-                          {isOpen ? (
-                            <ChevronUp size={18} />
-                          ) : (
-                            <ChevronDown size={18} />
-                          )}
-                        </button>
+                        <div className="d-flex justify-content-center gap-1">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() =>
+                              setOpenSaleId(isOpen ? null : sale.id)
+                            }
+                            title="Ver detalhes"
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: "50%",
+                              padding: 0,
+                            }}
+                          >
+                            {isOpen ? (
+                              <ChevronUp size={17} />
+                            ) : (
+                              <ChevronDown size={17} />
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() => openEditSale(sale)}
+                            title="Editar venda"
+                            disabled={deletingSaleId === sale.id}
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: "50%",
+                              padding: 0,
+                            }}
+                          >
+                            <Pencil size={16} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={() => removeSale(sale)}
+                            title="Excluir venda"
+                            disabled={deletingSaleId === sale.id}
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: "50%",
+                              padding: 0,
+                            }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
 
@@ -1309,10 +1988,40 @@ function AdminVendasContent() {
                             <div className="row g-3 mb-3">
                               <InfoItem label="ID completo do pedido" value={`#${sale.id}`} />
                               <InfoItem label="ID do usuário" value={text(sale.userId)} />
-                              <InfoItem label="Status" value={statusLabel(sale.status)} />
+                              <InfoItem label="Status" value={adminStatusLabel(sale.status)} />
+                              <InfoItem
+                                label="Origem"
+                                value={
+                                  sale.saleSource === "whatsapp_cart"
+                                    ? "Carrinho / WhatsApp"
+                                    : "Venda normal"
+                                }
+                              />
+                              <InfoItem
+                                label="Forma de entrega"
+                                value={
+                                  sale.deliveryMethodLabel ||
+                                  deliveryTypeLabel(sale.deliveryType)
+                                }
+                              />
+                              <InfoItem
+                                label="Concluído em"
+                                value={
+                                  sale.completedAt
+                                    ? formatDate(sale.completedAt)
+                                    : "Não concluído"
+                                }
+                              />
                               <InfoItem label="Criado em" value={formatDate(sale.createdAt)} />
                               <InfoItem label="Atualizado em" value={formatDate(sale.updatedAt)} />
-                              <InfoItem label="Tipo de entrega" value={deliveryTypeLabel(sale.deliveryType)} />
+                              <InfoItem
+                                label="Observação do pedido"
+                                value={text(sale.observation)}
+                              />
+                              <InfoItem
+                                label="Observação interna"
+                                value={text(sale.internalNotes)}
+                              />
                               <InfoItem label="Nome" value={text(sale.customer?.name)} />
                               <InfoItem
                                 label="CPF/CNPJ"
@@ -1614,6 +2323,42 @@ function AdminVendasContent() {
                               <div className="d-flex flex-wrap gap-2">
                                 <button
                                   type="button"
+                                  className="btn btn-sm btn-outline-secondary"
+                                  disabled={isUpdatingThisSale || deletingSaleId === sale.id}
+                                  style={{ borderRadius: 999 }}
+                                  onClick={() => openEditSale(sale)}
+                                >
+                                  <Pencil size={15} className="me-1" />
+                                  Editar venda
+                                </button>
+
+                                {sale.status !== "concluido" && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-success"
+                                    disabled={isUpdatingThisSale || deletingSaleId === sale.id}
+                                    style={{ borderRadius: 999 }}
+                                    onClick={() => markAsCompleted(sale)}
+                                  >
+                                    <CheckCircle2 size={15} className="me-1" />
+                                    Marcar como concluído
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-danger"
+                                  disabled={isUpdatingThisSale || deletingSaleId === sale.id}
+                                  style={{ borderRadius: 999 }}
+                                  onClick={() => removeSale(sale)}
+                                >
+                                  <Trash2 size={15} className="me-1" />
+                                  {deletingSaleId === sale.id ? "Excluindo..." : "Excluir venda"}
+                                </button>
+
+                                {Boolean(onlyNumbers(sale.customer?.phone)) && (
+                                <button
+                                  type="button"
                                   className="btn btn-sm"
                                   disabled={isUpdatingThisSale}
                                   style={{
@@ -1631,6 +2376,7 @@ function AdminVendasContent() {
                                   <WhatsAppIcon size={15} />{" "}
                                   WhatsApp
                                 </button>
+                                )}
 
                                 <button
                                   type="button"

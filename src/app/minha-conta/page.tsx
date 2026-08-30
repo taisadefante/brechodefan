@@ -593,7 +593,7 @@ function MinhaContaContent() {
           }}
         >
           <h1 className="fw-bold mb-1">
-            {mode === "login" ? "Login / Cadastro" : "Criar cadastro"}
+            {mode === "login" ? "Cadastro" : "Criar cadastro"}
           </h1>
 
           <p style={{ color: theme.brownSoft }}>
