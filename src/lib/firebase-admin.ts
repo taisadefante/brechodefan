@@ -18,8 +18,7 @@ function getFirebaseAdminConfig() {
     process.env.FIREBASE_ADMIN_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
-  const clientEmail =
-    process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+  const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
 
   if (!projectId) {
     throw new Error(
@@ -40,6 +39,16 @@ function getFirebaseAdminConfig() {
   };
 }
 
+/**
+ * IMPORTANTE:
+ *
+ * Não inicializamos o Firebase Admin no topo do arquivo.
+ * Isso evita que o Next.js tente ler as credenciais durante
+ * a etapa "Collecting page data" do build da Vercel.
+ *
+ * O Firebase Admin só será inicializado quando uma API realmente
+ * chamar getAdminDb().
+ */
 export function getAdminDb() {
   const existingApp = getApps()[0];
 
@@ -47,11 +56,8 @@ export function getAdminDb() {
     return getFirestore(existingApp);
   }
 
-  const {
-    projectId,
-    clientEmail,
-    privateKey,
-  } = getFirebaseAdminConfig();
+  const { projectId, clientEmail, privateKey } =
+    getFirebaseAdminConfig();
 
   const app = initializeApp({
     credential: cert({
