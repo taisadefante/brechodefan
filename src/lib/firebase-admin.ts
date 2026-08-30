@@ -13,20 +13,17 @@ function getPrivateKey() {
   return value.replace(/\\n/g, "\n");
 }
 
-function getAdminApp() {
-  if (getApps().length) {
-    return getApps()[0]!;
-  }
-
+function getFirebaseAdminConfig() {
   const projectId =
     process.env.FIREBASE_ADMIN_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
-  const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+  const clientEmail =
+    process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
 
   if (!projectId) {
     throw new Error(
-      "FIREBASE_ADMIN_PROJECT_ID ou NEXT_PUBLIC_FIREBASE_PROJECT_ID não foi configurado.",
+      "FIREBASE_ADMIN_PROJECT_ID ou NEXT_PUBLIC_FIREBASE_PROJECT_ID não foi configurado no servidor.",
     );
   }
 
@@ -36,13 +33,33 @@ function getAdminApp() {
     );
   }
 
-  return initializeApp({
+  return {
+    projectId,
+    clientEmail,
+    privateKey: getPrivateKey(),
+  };
+}
+
+export function getAdminDb() {
+  const existingApp = getApps()[0];
+
+  if (existingApp) {
+    return getFirestore(existingApp);
+  }
+
+  const {
+    projectId,
+    clientEmail,
+    privateKey,
+  } = getFirebaseAdminConfig();
+
+  const app = initializeApp({
     credential: cert({
       projectId,
       clientEmail,
-      privateKey: getPrivateKey(),
+      privateKey,
     }),
   });
-}
 
-export const adminDb = getFirestore(getAdminApp());
+  return getFirestore(app);
+}
